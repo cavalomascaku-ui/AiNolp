@@ -7,17 +7,10 @@ export interface CodePatch {
   newSnippet?: string; // Conteúdo novo (para create) ou substituto (para update)
 }
 
-export interface SearchSource {
-  title: string;
-  uri: string;
-}
-
 export interface AiResponse {
   thoughtProcess: string;
   changelog?: string[]; 
   patches: CodePatch[];
-  searchSources?: SearchSource[]; // Novas fontes de pesquisa
-  suggestedAssetQuery?: string; // NOVO: A IA sugere uma busca de imagem
 }
 
 export interface SecurityVulnerability {
@@ -50,15 +43,6 @@ export interface ExtractedVideo {
   poster?: string;
 }
 
-export interface ImageResult {
-  url: string;
-  thumbnail?: string;
-  title: string;
-  source: string;
-  isGenerated?: boolean; // Se foi gerada por IA na hora
-  type?: 'image' | 'model3d' | 'gif'; // Suporte a modelos 3D e GIFs
-}
-
 export interface Attachment {
   mimeType: string;
   data: string;
@@ -75,8 +59,7 @@ export interface ChatMessage {
 export enum AppTab {
   EDITOR = 'EDITOR',
   PREVIEW = 'PREVIEW',
-  CHAT = 'CHAT',
-  MEDIA = 'MEDIA'
+  CHAT = 'CHAT'
 }
 
 export interface AgentLog {
@@ -87,7 +70,7 @@ export interface AgentLog {
 
 export interface AgentStatus {
   isActive: boolean;
-  mode: 'idle' | 'thinking' | 'cloning' | 'coding' | 'debugging' | 'scanning' | 'raptor' | 'attacking' | 'searching_images';
+  mode: 'idle' | 'thinking' | 'cloning' | 'coding' | 'debugging' | 'scanning' | 'raptor' | 'attacking';
   logs: AgentLog[];
   progress: number; // 0 a 100
   estimatedSeconds: number;
@@ -113,4 +96,12 @@ export interface EditorThemeColors {
   number: string;
 }
 
-export type SearchSourceType = 'lexica' | 'wiki' | 'web' | 'reddit' | 'artstation' | 'unsplash' | 'openverse' | 'deviantart' | 'giphy' | 'itchio' | 'opengameart';
+export type SearchSourceType = 'lexica' | 'web' | 'reddit' | 'opengameart' | 'itchio' | 'deviantart';
+
+export interface ImageResult {
+  url: string;
+  title: string;
+  type: 'image' | 'gif' | 'model3d';
+  source?: string;
+  thumbnail?: string;
+}

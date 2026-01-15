@@ -1,14 +1,63 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { CodeEditor } from './components/Editor';
 import { Preview } from './components/Preview';
 import { AgentStatusOverlay } from './components/AgentStatus';
-import { MediaGallery } from './components/MediaGallery'; 
-import { analyzeAndEditCode, validateConnection, searchImagesWithAi } from './services/gemini';
+import { analyzeAndEditCode, validateConnection } from './services/gemini';
 import { applyPatch, formatHTML } from './utils/patcher';
-import { ChatMessage, AppTab, AgentStatus, CodePatch, RuntimeError, ProjectFiles, AgentLog, PlatformTarget, EditorThemeColors, ImageResult, Attachment, AiResponse } from './types';
+import { ChatMessage, AppTab, AgentStatus, CodePatch, RuntimeError, ProjectFiles, AgentLog, PlatformTarget, EditorThemeColors, Attachment, AiResponse } from './types';
 import { Send, Code, Play, MessageSquare, Upload, Zap, Terminal, MonitorPlay, Sparkles, Download, Undo2, Redo2, AlertTriangle, Bug, BrainCircuit, X, Users, Wrench, ChevronDown, Trash2, Rocket, FilePlus, FileText, Layout, FolderOpen, Paperclip, FileImage, Loader2, CheckCircle2, Info, Package, PanelLeft, Search, File as FileIcon, Gamepad2, Globe, Copy, Layers, ShieldAlert, Clapperboard, Film, Lock, Unlock, CheckSquare, Square, RefreshCw, Sparkles as AiSparkles, Sword, Globe2, Plus, Image as ImageIcon, ExternalLink, Settings, KeyRound, Eye, EyeOff, Server, Cpu, Wifi, WifiOff, FileEdit, MoreVertical, Smartphone, Monitor, Laptop, Palette, BookOpen, StickyNote, FileCode, Check, PenTool, Lightbulb, ArrowRight } from 'lucide-react';
 import JSZip from 'jszip';
+
+interface ErrorBoundaryProps {
+  children?: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+// --- ERROR BOUNDARY (Proteção contra Tela Preta) ---
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Uncaught Error in UI:", error, errorInfo);
+  }
+
+  handleReset = () => {
+      this.setState({ hasError: false, error: null });
+      window.location.reload();
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-screen w-screen bg-black flex flex-col items-center justify-center text-white p-6 text-center">
+            <ShieldAlert className="w-16 h-16 text-red-500 mb-4" />
+            <h2 className="text-2xl font-bold mb-2">Ops! Ocorreu um erro crítico.</h2>
+            <p className="text-zinc-400 max-w-md mb-6 text-sm">
+                O aplicativo encontrou um problema inesperado (provavelmente ao processar um arquivo grande ou complexo).
+            </p>
+            <div className="bg-zinc-900 p-4 rounded-lg border border-zinc-800 font-mono text-xs text-red-300 mb-6 max-w-lg w-full overflow-auto max-h-32">
+                {this.state.error?.message || 'Erro desconhecido'}
+            </div>
+            <button 
+                onClick={this.handleReset}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg font-bold transition-colors flex items-center gap-2"
+            >
+                <RefreshCw className="w-4 h-4" /> Recarregar App
+            </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const INITIAL_FILES: ProjectFiles = {
   'index.html': `<!DOCTYPE html>
@@ -72,6 +121,13 @@ const CREATIVE_PRESETS = [
 
 const convertToSupportedImage = (blob: Blob): Promise<Blob> => {
   return new Promise((resolve) => {
+      // Se for muito grande, a gente rejeita ou comprime (Aqui vamos manter simples, mas seguro)
+      if (blob.size > 5 * 1024 * 1024) { // 5MB Limit
+          console.warn("Imagem muito grande para processamento direto.");
+          resolve(blob); 
+          return;
+      }
+
       if (['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(blob.type)) {
           resolve(blob);
           return;
@@ -82,23 +138,36 @@ const convertToSupportedImage = (blob: Blob): Promise<Blob> => {
       }
       const img = new Image();
       const url = URL.createObjectURL(blob);
+      
       img.onload = () => {
           const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
+          // Redimensionar se for gigante para evitar OOM
+          const MAX_DIM = 2048;
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > MAX_DIM || height > MAX_DIM) {
+              const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+              width *= ratio;
+              height *= ratio;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
           const ctx = canvas.getContext('2d');
           if (ctx) {
-              ctx.drawImage(img, 0, 0);
+              ctx.drawImage(img, 0, 0, width, height);
               canvas.toBlob((newBlob) => {
                   URL.revokeObjectURL(url);
                   if (newBlob) resolve(newBlob);
                   else resolve(blob);
-              }, 'image/png');
+              }, 'image/png', 0.8);
           } else {
               URL.revokeObjectURL(url);
               resolve(blob);
           }
       };
+      
       img.onerror = () => {
           URL.revokeObjectURL(url);
           resolve(blob); 
@@ -107,7 +176,7 @@ const convertToSupportedImage = (blob: Blob): Promise<Blob> => {
   });
 };
 
-export default function App() {
+function AppContent() {
   const [files, setFiles] = useState<ProjectFiles>(INITIAL_FILES);
   const [activeFilename, setActiveFilename] = useState<string>('index.html');
   const [history, setHistory] = useState<ProjectFiles[]>([INITIAL_FILES]);
@@ -175,9 +244,6 @@ export default function App() {
   const [connectionMessage, setConnectionMessage] = useState('');
   
   const [showModelGallery, setShowModelGallery] = useState(false);
-  
-  const [autoSearchEnabled, setAutoSearchEnabled] = useState(true);
-  const [triggerAutoSearchQuery, setTriggerAutoSearchQuery] = useState<string>('');
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -321,7 +387,12 @@ export default function App() {
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'PREVIEW_ERROR') {
-        if (event.data.payload.message && event.data.payload.message.includes('ResizeObserver')) return;
+        const { message, line } = event.data.payload;
+        if (message && message.includes('ResizeObserver')) return;
+        
+        // Ignore generic 'Script error.' if there is no line information, usually noise or CORS issues.
+        if (message === 'Script error.' && !line) return;
+
         setRuntimeError(event.data.payload);
       }
       if (event.data && event.data.type === 'LINK_CLICK') {
@@ -365,7 +436,10 @@ export default function App() {
     for (const patch of patches) {
       try {
           patchCount++;
-          setAgentStatus(prev => ({ ...prev, progress: 95 + ((patchCount / patches.length) * 5), logs: [...prev.logs, { message: `Aplicando: ${patch.description}`, timestamp: Date.now(), type: 'info' }] }));
+          // Fallback para descrição se vier undefined
+          const patchDesc = patch.description || `Aplicando alterações no arquivo ${patch.targetFile}`;
+          
+          setAgentStatus(prev => ({ ...prev, progress: 95 + ((patchCount / patches.length) * 5), logs: [...prev.logs, { message: patchDesc, timestamp: Date.now(), type: 'info' }] }));
           await new Promise(resolve => setTimeout(resolve, 600)); 
           
           const target = patch.targetFile || currentActiveFile;
@@ -381,13 +455,27 @@ export default function App() {
             const result = applyPatch(fileContent, patch);
             if (result.success) {
                currentFiles[target] = result.newCode;
-               setHighlightSnippet(patch.newSnippet);
+               
+               // PREVENÇÃO DE CRASH DO MONACO EDITOR (Regex too large)
+               // Se o snippet for muito grande (ex: base64 images), não tentamos destacar.
+               if (patch.newSnippet && patch.newSnippet.length < 5000) {
+                   setHighlightSnippet(patch.newSnippet);
+               } else {
+                   setHighlightSnippet(undefined);
+               }
+
                if (target !== currentActiveFile) {
                    currentActiveFile = target;
                    setActiveFilename(target);
                }
             } else {
-               setAgentStatus(prev => ({ ...prev, logs: [...prev.logs, { message: `⚠️ ERRO: Não achei onde colar no ${target}`, timestamp: Date.now(), type: 'warning' }] }));
+               setAgentStatus(prev => ({ ...prev, logs: [...prev.logs, { message: `⚠️ FALHA: ${patchDesc}`, timestamp: Date.now(), type: 'warning' }] }));
+               // ALERTA VISUAL NO CHAT SE FALHAR
+               setMessages(prev => [...prev, { 
+                   id: Date.now().toString(), 
+                   role: 'system', 
+                   content: `❌ **Falha ao aplicar patch no arquivo '${target}'**.\nMotivo: O trecho de código original não foi encontrado exatamente como a IA descreveu. A IA pode tentar novamente ou você pode aplicar manualmente.` 
+               }]);
             }
           }
           
@@ -403,7 +491,7 @@ export default function App() {
     updateFilesWithHistory(currentFiles);
     setAgentStatus({ isActive: false, mode: 'idle', logs: [], progress: 100, estimatedSeconds: 0 });
     setRefreshKey(prev => prev + 1);
-    setHighlightSnippet(undefined); 
+    // Note: We might leave highlightSnippet active for the last patch if it was small enough
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -462,8 +550,12 @@ export default function App() {
     try {
       const processedAttachments: Attachment[] = [];
       for (const file of attachments) {
-          const base64 = await fileToBase64(file);
-          processedAttachments.push({ mimeType: file.type, data: base64 });
+          try {
+             const base64 = await fileToBase64(file);
+             processedAttachments.push({ mimeType: file.type, data: base64 });
+          } catch(err) {
+              console.error("Falha ao processar anexo para IA", file.name, err);
+          }
       }
       const response = await analyzeAndEditCode(files, technicalPrompt, processedAttachments, forceThinking || isThinkingMode, modeToUse, handleStreamChunk, platformTarget);
       
@@ -488,13 +580,6 @@ export default function App() {
       }
 
       await applyPatchesSequentially(response.patches);
-
-      if (response.suggestedAssetQuery && autoSearchEnabled) {
-          const q = response.suggestedAssetQuery;
-          setMessages(prev => [...prev, { id: (Date.now() + 1.5).toString(), role: 'system', content: `🔍 **IA Buscando Asset:** Necessito de imagens para "${q}".\nPor favor, **selecione a melhor opção** na Galeria para eu continuar.` }]);
-          setActiveTab(AppTab.MEDIA);
-          setTriggerAutoSearchQuery(q);
-      }
 
       setMessages(prev => [...prev, { id: (Date.now() + 2).toString(), role: 'assistant', content: '✅ Processo finalizado.' }]);
     } catch (error: any) {
@@ -545,43 +630,7 @@ export default function App() {
       setPendingCreativeUpdate(null);
       // setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: pendingCreativeUpdate.thoughtProcess }]);
       await applyPatchesSequentially(pendingCreativeUpdate.patches);
-      if (pendingCreativeUpdate.suggestedAssetQuery && autoSearchEnabled) {
-          setMessages(prev => [...prev, { id: (Date.now() + 1.5).toString(), role: 'system', content: `🔍 **IA Buscando Asset:** Necessito de imagens para "${pendingCreativeUpdate.suggestedAssetQuery}".` }]);
-          setActiveTab(AppTab.MEDIA);
-          setTriggerAutoSearchQuery(pendingCreativeUpdate.suggestedAssetQuery);
-      }
       setMessages(prev => [...prev, { id: (Date.now() + 2).toString(), role: 'assistant', content: '✅ Alterações aplicadas com sucesso.' }]);
-  };
-
-  const handleImageIntegration = async (images: ImageResult[], query: string) => {
-    const newFiles: File[] = [];
-    let hiddenContext = `\n\n[SISTEMA - CONTEXTO DE ASSETS SELECIONADOS]\n`;
-    hiddenContext += `O usuário selecionou as seguintes imagens na Galeria para uso imediato no código:\n`;
-    const isSpriteSheetRequest = query.includes('SPRITE_SHEET');
-    for (const img of images) {
-        hiddenContext += `- URL: ${img.url.startsWith('data:') ? '[DATA_URI_BASE64]' : img.url} (Fonte: ${img.source || 'web'})\n`;
-        try {
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(img.url)}`;
-            const response = await fetch(proxyUrl);
-            let blob = await response.blob();
-            if (blob.type === 'image/gif' || blob.type === 'image/svg+xml') {
-                    blob = await convertToSupportedImage(blob);
-            }
-            let filename = img.title ? img.title.replace(/[^a-z0-9]/gi, '_').substring(0, 20) : 'image';
-            const mimeExt = blob.type.split('/')[1];
-            const ext = mimeExt === 'jpeg' ? 'jpg' : mimeExt;
-            if (!filename.endsWith('.' + ext)) filename += '.' + ext;
-            const file = new File([blob], filename, { type: blob.type });
-            newFiles.push(file);
-        } catch (e) {
-            console.warn("Falha no blob, usando apenas URL:", img.url);
-        }
-    }
-    hiddenContext += `\nINSTRUÇÃO: Use as URLs fornecidas.`;
-    if (isSpriteSheetRequest) hiddenContext += `\n[MODO SPRITE SHEET]: Anime usando CSS steps().`;
-    setChatAttachments(prev => [...prev, ...newFiles]);
-    setPendingAssetContext(prev => prev + hiddenContext);
-    setActiveTab(AppTab.CHAT);
   };
   
   const handleChatAttachmentSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { 
@@ -589,13 +638,23 @@ export default function App() {
         const rawFiles: File[] = Array.from(e.target.files); 
         if (chatAttachments.length + rawFiles.length > 3) return alert("Máximo 3 arquivos.");
         const processedFiles: File[] = [];
+        
         for (const file of rawFiles) {
+            // Proteção contra arquivos gigantes (5MB) para evitar crash de memória/render
+            if (file.size > 5 * 1024 * 1024) {
+                alert(`O arquivo "${file.name}" é muito grande (Máx 5MB). Ele será ignorado.`);
+                continue;
+            }
+
             if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
                 try {
                     const convertedBlob = await convertToSupportedImage(file);
                     const newFile = new File([convertedBlob], file.name.replace(/\.(gif|svg)$/i, '.png'), { type: 'image/png' });
                     processedFiles.push(newFile);
-                } catch (e) { processedFiles.push(file); }
+                } catch (e) { 
+                    console.error("Erro na conversão de imagem", e);
+                    processedFiles.push(file); 
+                }
             } else { processedFiles.push(file); }
         }
         setChatAttachments(prev => [...prev, ...processedFiles]); 
@@ -764,42 +823,36 @@ export default function App() {
                                    <FileCode className="w-4 h-4" /> Arquivos Modificados ({pendingCreativeUpdate.patches.length})
                                </h4>
                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                   {pendingCreativeUpdate.patches.map((patch, idx) => (
+                                   {pendingCreativeUpdate.patches.map((patch, idx) => {
+                                       // SAFEGUARD: Ensure action and targetFile exist
+                                       const action = patch.action || 'update';
+                                       const target = patch.targetFile || 'unknown';
+                                       
+                                       return (
                                        <div key={idx} className="group flex flex-col p-4 bg-zinc-900 border border-zinc-800 hover:border-zinc-600 rounded-xl transition-all hover:shadow-lg hover:-translate-y-0.5">
                                            <div className="flex justify-between items-start mb-3">
                                                <div className="flex items-center gap-2">
-                                                   {patch.targetFile.endsWith('.html') ? <Layout className="w-4 h-4 text-orange-400" /> : 
-                                                    patch.targetFile.endsWith('.css') ? <FileText className="w-4 h-4 text-blue-400" /> :
-                                                    patch.targetFile.endsWith('.js') ? <Code className="w-4 h-4 text-yellow-400" /> :
+                                                   {target.endsWith('.html') ? <Layout className="w-4 h-4 text-orange-400" /> : 
+                                                    target.endsWith('.css') ? <FileText className="w-4 h-4 text-blue-400" /> :
+                                                    target.endsWith('.js') ? <Code className="w-4 h-4 text-yellow-400" /> :
                                                     <FileIcon className="w-4 h-4 text-zinc-500" />}
-                                                   <span className="font-bold text-sm text-zinc-200">{patch.targetFile}</span>
+                                                   <span className="font-bold text-sm text-zinc-200">{target}</span>
                                                </div>
                                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                                                   patch.action === 'create' ? 'bg-emerald-950/50 border-emerald-500/30 text-emerald-400' : 
-                                                   patch.action === 'delete' ? 'bg-red-950/50 border-red-500/30 text-red-400' : 
+                                                   action === 'create' ? 'bg-emerald-950/50 border-emerald-500/30 text-emerald-400' : 
+                                                   action === 'delete' ? 'bg-red-950/50 border-red-500/30 text-red-400' : 
                                                    'bg-blue-950/50 border-blue-500/30 text-blue-400'
                                                }`}>
-                                                   {patch.action.toUpperCase()}
+                                                   {action.toUpperCase()}
                                                </span>
                                            </div>
                                            <p className="text-xs text-zinc-500 leading-snug group-hover:text-zinc-400 transition-colors">
-                                               {patch.description}
+                                               {patch.description || 'Sem descrição'}
                                            </p>
                                        </div>
-                                   ))}
+                                   )})}
                                </div>
                            </div>
-                           {pendingCreativeUpdate.suggestedAssetQuery && (
-                               <div className="flex items-center gap-4 p-4 bg-purple-900/10 border border-purple-500/30 rounded-xl">
-                                    <div className="p-2 bg-purple-500/20 rounded-lg">
-                                        <ImageIcon className="w-5 h-5 text-purple-400" />
-                                    </div>
-                                    <div>
-                                        <h5 className="text-xs font-bold text-purple-300">Sugestão de Busca Automática</h5>
-                                        <p className="text-xs text-zinc-400">A IA buscará imagens para: <span className="text-white font-mono">"{pendingCreativeUpdate.suggestedAssetQuery}"</span></p>
-                                    </div>
-                               </div>
-                           )}
                        </div>
                        <div className="p-6 border-t border-zinc-900 bg-zinc-950 flex justify-end gap-3 z-10">
                            <button onClick={() => setPendingCreativeUpdate(null)} className="px-6 py-3 rounded-xl text-xs font-bold text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors">
@@ -1028,7 +1081,6 @@ export default function App() {
                 <div className="hidden md:flex border-b border-zinc-900 bg-black h-9 flex-none">
                     <button onClick={() => setActiveTab(AppTab.PREVIEW)} className={`px-4 flex items-center gap-2 text-[11px] font-medium border-b-2 ${(activeTab === AppTab.PREVIEW || activeTab === AppTab.EDITOR) ? 'text-indigo-400 border-indigo-500 bg-zinc-900' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}><Play className="w-3.5 h-3.5" /> Preview</button>
                     <button onClick={() => setActiveTab(AppTab.CHAT)} className={`px-4 flex items-center gap-2 text-[11px] font-medium border-b-2 ${activeTab === AppTab.CHAT ? 'text-indigo-400 border-indigo-500 bg-zinc-900' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}><MessageSquare className="w-3.5 h-3.5" /> Chat</button>
-                    <button onClick={() => setActiveTab(AppTab.MEDIA)} className={`px-4 flex items-center gap-2 text-[11px] font-medium border-b-2 ${activeTab === AppTab.MEDIA ? 'text-pink-400 border-pink-500 bg-zinc-900' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}><ImageIcon className="w-3.5 h-3.5" /> Mídia</button>
                 </div>
                 
                 <div className="flex-1 relative overflow-hidden flex flex-col">
@@ -1063,25 +1115,9 @@ export default function App() {
                             <div ref={messagesEndRef} />
                         </div>
                     </div>
-
-                    <div className={`absolute inset-0 bg-black flex flex-col ${ (activeTab === AppTab.MEDIA) ? 'z-10 visible' : 'z-0 invisible' }`}>
-                        <MediaGallery 
-                           onSearch={async (query, filters, sources) => {
-                               setAgentStatus({ isActive: true, mode: 'searching_images', logs: [{message: 'Vasculhando Google, DDG, Lexica...', timestamp: Date.now(), type: 'info'}], progress: 50, estimatedSeconds: 3 });
-                               const results = await searchImagesWithAi(query, filters, sources);
-                               setAgentStatus({ isActive: false, mode: 'idle', logs: [], progress: 0, estimatedSeconds: 0 });
-                               return results;
-                           }} 
-                           onIntegrate={handleImageIntegration}
-                           isSearching={agentStatus.mode === 'searching_images'}
-                           autoSearchEnabled={autoSearchEnabled}
-                           toggleAutoSearch={() => setAutoSearchEnabled(!autoSearchEnabled)}
-                           triggerQuery={triggerAutoSearchQuery}
-                        />
-                    </div>
                 </div>
                 
-                <div className={`flex-none p-3 border-t border-zinc-900 bg-black ${ (activeTab === AppTab.CHAT) ? 'flex' : 'hidden md:flex' } ${(activeTab === AppTab.MEDIA) ? '!hidden' : ''}`}>
+                <div className={`flex-none p-3 border-t border-zinc-900 bg-black ${ (activeTab === AppTab.CHAT) ? 'flex' : 'hidden md:flex' }`}>
                     <div className="w-full flex flex-col gap-2">
                         {chatAttachments.length > 0 && (
                             <div className="flex gap-2 overflow-x-auto pb-2 px-1">
@@ -1114,12 +1150,19 @@ export default function App() {
             </div>
             <AgentStatusOverlay status={agentStatus} streamContent={streamedResponse} />
       </main>
-      <nav className="md:hidden flex-none border-t border-zinc-900 bg-black pb-[env(safe-area-inset-bottom,20px)] pt-2 z-30 grid grid-cols-4">
+      <nav className="md:hidden flex-none border-t border-zinc-900 bg-black pb-[env(safe-area-inset-bottom,20px)] pt-2 z-30 grid grid-cols-3">
             <button onClick={() => setActiveTab(AppTab.EDITOR)} className={`flex flex-col items-center justify-center py-2.5 gap-1 ${activeTab === AppTab.EDITOR ? 'text-indigo-400' : 'text-zinc-600'}`}><Code className="w-5 h-5" /><span className="text-[9px] font-bold">CÓDIGO</span></button>
             <button onClick={() => setActiveTab(AppTab.PREVIEW)} className={`flex flex-col items-center justify-center py-2.5 gap-1 ${activeTab === AppTab.PREVIEW ? 'text-indigo-400' : 'text-zinc-600'}`}><MonitorPlay className="w-5 h-5" /><span className="text-[9px] font-bold">PREVIEW</span></button>
-            <button onClick={() => setActiveTab(AppTab.MEDIA)} className={`flex flex-col items-center justify-center py-2.5 gap-1 ${activeTab === AppTab.MEDIA ? 'text-pink-400' : 'text-zinc-600'}`}><ImageIcon className="w-5 h-5" /><span className="text-[9px] font-bold">MÍDIA</span></button>
             <button onClick={() => setActiveTab(AppTab.CHAT)} className={`flex flex-col items-center justify-center py-2.5 gap-1 ${activeTab === AppTab.CHAT ? 'text-indigo-400' : 'text-zinc-600'}`}><MessageSquare className="w-5 h-5" /><span className="text-[9px] font-bold">CHAT</span></button>
       </nav>
     </div>
   );
+}
+
+export default function App() {
+    return (
+        <ErrorBoundary>
+            <AppContent />
+        </ErrorBoundary>
+    );
 }

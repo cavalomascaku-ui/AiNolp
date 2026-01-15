@@ -2,152 +2,261 @@
 import { CodePatch } from '../types';
 
 /**
- * Escapes special regex characters.
+ * UTILS
  */
 function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * Limpa artefatos comuns de alucinação da IA e deduplica spam
- */
-function sanitizeSnippet(snippet: string): string {
-    if (!snippet) return '';
-    let s = snippet;
-
-    // Remove blocos de código markdown se a IA esquecer de tirar
-    s = s.replace(/^```[a-z]*\n/i, '').replace(/```$/i, '');
-
-    // Remove o padrão style> n <style e spam de /n
-    s = s.replace(/(style>\s*n\s*<style\s*)+/gi, ''); 
-    s = s.replace(/style>\s*n\s*<style/gi, '');
-    s = s.replace(/(\/n\s*){3,}/g, '\n');
-
-    // Remove linhas repetidas consecutivas (anti-loop)
-    const lines = s.split('\n');
-    const deduped: string[] = [];
-    let last = '';
-    let count = 0;
-    for (const l of lines) {
-        const trim = l.trim();
-        if (trim === 'n' || trim === '/n') continue; 
-        
-        if (trim === last && trim.length > 0) {
-            count++;
-            if (count < 2) deduped.push(l); 
-        } else {
-            count = 0;
-            last = trim;
-            deduped.push(l);
-        }
+// ----------------------------------------------------------------------
+// STRATEGY 1: EXACT MATCH
+// ----------------------------------------------------------------------
+function exactReplace(currentCode: string, originalSnippet: string, newSnippet: string): string | null {
+    if (currentCode.includes(originalSnippet)) {
+        return currentCode.replace(originalSnippet, newSnippet);
     }
-    s = deduped.join('\n');
-
-    // Correções de segurança básicas
-    s = s.replace(/\\n/g, '\n');
-    s = s.replace(/\\"/g, '"');
-
-    return s.trim();
+    return null;
 }
 
-export const formatHTML = (html: string): string => {
-  try {
-      let formatted = '';
-      let indent = 0;
-      const clean = html.replace(/>\s+</g, '><').trim();
-      const tags = clean.replace(/>/g, '>\n').replace(/</g, '\n<').split('\n');
-      tags.forEach(tag => {
-        if (!tag.trim()) return;
-        if (tag.match(/^<\//)) indent = Math.max(0, indent - 1);
-        formatted += '  '.repeat(indent) + tag.trim() + '\n';
-        const isOpening = tag.match(/^<[a-zA-Z]/);
-        const isSelfClosing = tag.match(/\/>$/);
-        const isVoid = tag.match(/^<(input|img|br|hr|meta|link|base|area|col|embed|source|track|wbr)/i);
-        if (isOpening && !isSelfClosing && !isVoid && !tag.startsWith('<!')) indent++;
-      });
-      return formatted.trim();
-  } catch (e) {
-      return html;
-  }
-};
+// ----------------------------------------------------------------------
+// STRATEGY 2: TOKEN SLIDING WINDOW (THE "NUCLEAR" OPTION)
+// ----------------------------------------------------------------------
+// This strategy ignores ALL punctuation, whitespace, and formatting.
+// It matches the sequence of alphanumeric "words" (tokens).
+//
+// Example:
+// File:    <div id="app" class="main">
+// Snippet: <div id='app' class='main'>
+// Tokens:  [div, id, app, class, main] -> MATCH!
+//
+// It then maps the token positions back to the original string indices to replace safely.
 
-/**
- * Aplica o patch com lógica de "Fail-Safe".
- */
+interface Token {
+    value: string;
+    start: number;
+    end: number;
+}
+
+function tokenize(text: string): Token[] {
+    const tokens: Token[] = [];
+    // Match alphanumeric words, identifiers, numbers. 
+    // We intentionally ignore symbols like < > = " ' ; { } [ ]
+    // Regex explanation: [a-zA-Z0-9_$]+ matches typical JS identifiers and HTML tag names
+    const regex = /[a-zA-Z0-9_$]+/g;
+    
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        tokens.push({
+            value: match[0],
+            start: match.index,
+            end: match.index + match[0].length
+        });
+    }
+    return tokens;
+}
+
+function tokenBasedReplace(currentCode: string, originalSnippet: string, newSnippet: string): string | null {
+    const fileTokens = tokenize(currentCode);
+    const snippetTokens = tokenize(originalSnippet);
+
+    // Safety: If snippet is too small (e.g., just "div"), it's too dangerous to replace fuzzily.
+    // Minimum 3 tokens to ensure context (e.g. "function start game")
+    if (snippetTokens.length < 3) return null;
+
+    if (snippetTokens.length === 0) return null;
+
+    // Sliding Window Search
+    // We look for the sequence of snippetTokens inside fileTokens
+    let matchStartIndex = -1;
+
+    for (let i = 0; i <= fileTokens.length - snippetTokens.length; i++) {
+        let isMatch = true;
+        for (let j = 0; j < snippetTokens.length; j++) {
+            if (fileTokens[i + j].value !== snippetTokens[j].value) {
+                isMatch = false;
+                break;
+            }
+        }
+
+        if (isMatch) {
+            // Check for uniqueness: If we find a second match, it's ambiguous, so abort (safety first)
+            // Exception: If the snippet is huge (>20 tokens), we assume uniqueness is implied by complexity
+            if (snippetTokens.length < 20) {
+                for (let k = i + 1; k <= fileTokens.length - snippetTokens.length; k++) {
+                    let isDouble = true;
+                    for (let l = 0; l < snippetTokens.length; l++) {
+                        if (fileTokens[k + l].value !== snippetTokens[l].value) {
+                            isDouble = false;
+                            break;
+                        }
+                    }
+                    if (isDouble) return null; // Ambiguous match found
+                }
+            }
+            
+            matchStartIndex = i;
+            break;
+        }
+    }
+
+    if (matchStartIndex !== -1) {
+        // We found the token sequence!
+        const firstToken = fileTokens[matchStartIndex];
+        const lastToken = fileTokens[matchStartIndex + snippetTokens.length - 1];
+
+        // Original start/end in the file string
+        // We expand slightly to catch surrounding punctuation that might have been part of the block
+        // e.g. if tokens are "function" ... "}" we want to include the punctuation around them if logically part of the line
+        
+        let startChar = firstToken.start;
+        let endChar = lastToken.end;
+
+        // EXPANSION LOGIC:
+        // Attempt to expand selection backwards to cover opening bracket/tag if the snippet implies it
+        // Example: Snippet "div class='x'" -> Tokens "div", "class", "x". 
+        // File "<div class='x'>". We want to capture the "<"
+        
+        const originalTrimmed = originalSnippet.trim();
+        const fileSubstring = currentCode.substring(startChar, endChar);
+
+        // Simple heuristic: If the snippet is roughly the same length as the match, just replace.
+        // If not, we might be missing punctuation.
+        // Ideally, we replace from the start of the first token to the end of the last token.
+        // But we need to handle cases like: Snippet: "const x = 1;" (tokens: const, x, 1)
+        // File: "const x = 1;"
+        // The tokens don't include ";". 
+        
+        // Scan forward from endChar to consume meaningful punctuation that matches the snippet's intent
+        // (This is tricky, so we stick to the token boundaries + safe whitespace consumption)
+        
+        // Aggressive Expansion:
+        // Look backwards from startChar for non-alphanumeric chars that match the originalSnippet's start
+        let snippetPtr = 0;
+        while (snippetPtr < originalSnippet.length && !/[a-zA-Z0-9_$]/.test(originalSnippet[snippetPtr])) {
+             // The snippet starts with symbols (e.g. "<!--"). 
+             // Move startChar back in file to match these if present
+             const charToMatch = originalSnippet[snippetPtr];
+             let backCheck = startChar - 1;
+             // Skip whitespace in file
+             while (backCheck >= 0 && /\s/.test(currentCode[backCheck])) backCheck--;
+             
+             if (backCheck >= 0 && currentCode[backCheck] === charToMatch) {
+                 startChar = backCheck;
+             }
+             snippetPtr++;
+        }
+
+        // Look forwards from endChar
+        let snippetEndPtr = originalSnippet.length - 1;
+        while (snippetEndPtr >= 0 && !/[a-zA-Z0-9_$]/.test(originalSnippet[snippetEndPtr])) {
+            const charToMatch = originalSnippet[snippetEndPtr];
+            let fwdCheck = endChar;
+            while (fwdCheck < currentCode.length && /\s/.test(currentCode[fwdCheck])) fwdCheck++;
+            
+            if (fwdCheck < currentCode.length && currentCode[fwdCheck] === charToMatch) {
+                endChar = fwdCheck + 1;
+            }
+            snippetEndPtr--;
+        }
+
+        const before = currentCode.substring(0, startChar);
+        const after = currentCode.substring(endChar);
+        
+        return before + newSnippet + after;
+    }
+
+    return null;
+}
+
+// ----------------------------------------------------------------------
+// STRATEGY 3: FALLBACK INJECTION (APPEND)
+// ----------------------------------------------------------------------
+function fallbackInject(currentCode: string, patch: CodePatch): string | null {
+    // If it's a new function or style, just append it to the end of the file/block
+    // This is better than failing completely.
+    
+    // Only applies if the prompt looks like "Add function X"
+    const newSnippet = patch.newSnippet || '';
+    
+    // Safety: Don't just append random small fixes like "x = 1"
+    // Only append substantial blocks (functions, css rules, classes)
+    const isSubstantial = newSnippet.includes('{') && newSnippet.includes('}');
+    
+    if (!isSubstantial) return null;
+
+    if (patch.targetFile.endsWith('.css')) {
+        return currentCode + '\n\n' + newSnippet;
+    }
+    
+    if (patch.targetFile.endsWith('.js') || patch.targetFile.endsWith('.html')) {
+        // Try to insert before the last closing tag
+        if (currentCode.includes('</body>')) {
+            return currentCode.replace('</body>', `${newSnippet}\n</body>`);
+        }
+        if (currentCode.includes('</script>')) {
+             // Insert before the LAST script tag closes
+             const lastScriptIdx = currentCode.lastIndexOf('</script>');
+             return currentCode.substring(0, lastScriptIdx) + '\n' + newSnippet + '\n' + currentCode.substring(lastScriptIdx);
+        }
+        // Just append
+        return currentCode + '\n' + newSnippet;
+    }
+
+    return null;
+}
+
+
+// ----------------------------------------------------------------------
+// MAIN APPLY FUNCTION
+// ----------------------------------------------------------------------
 export const applyPatch = (currentCode: string, patch: CodePatch): { newCode: string; success: boolean; error?: string } => {
   const originalSnippet = patch.originalSnippet || '';
-  let newSnippet = sanitizeSnippet(patch.newSnippet || '');
+  const newSnippet = patch.newSnippet || ''; 
 
-  // 0. Validações básicas
-  if (!newSnippet && patch.action !== 'delete') {
-      return { newCode: currentCode, success: false, error: "Snippet vazio." };
-  }
-  
-  // 1. Detecta substituição total (Arquivo Inteiro) ou Criação
-  const isFullHtml = (newSnippet.includes('<!DOCTYPE html>') || newSnippet.startsWith('<html'));
-  if (isFullHtml || patch.action === 'create') {
+  // 1. Creation / Full Overwrite
+  const isFullHtml = (newSnippet.includes('<!DOCTYPE html>') || newSnippet.trim().startsWith('<html'));
+  if (isFullHtml || patch.action === 'create' || currentCode.trim().length === 0) {
       return { newCode: newSnippet, success: true };
   }
-
-  // 2. Estratégia A: Match Exato (Ideal)
-  if (originalSnippet && currentCode.includes(originalSnippet)) {
-    return { newCode: currentCode.replace(originalSnippet, newSnippet), success: true };
-  }
-
-  // 3. Estratégia B: Normalização (Ignora espaços em branco diferentes)
-  // Remove espaços extras e quebras de linha para comparar a "essência" do código
-  const normalize = (str: string) => str.replace(/\s+/g, ' ').trim();
-  const normCurrent = normalize(currentCode);
-  const normSearch = normalize(originalSnippet);
-
-  // Se o snippet original normalizado for encontrado, precisamos achar a posição real no código não normalizado
-  // Isso é complexo, então vamos tentar uma abordagem de Regex Flexível primeiro
   
-  if (originalSnippet.length > 10) {
-      try {
-          // Cria um regex que permite qualquer whitespace entre as palavras do snippet original
-          const parts = originalSnippet.split(/\s+/).filter(p => p.length > 0);
-          // Escapa caracteres especiais de regex
-          const escapedParts = parts.map(escapeRegExp);
-          // Junta com \s+ (um ou mais espaços/newlines)
-          const regexString = escapedParts.join('\\s+');
-          const regex = new RegExp(regexString);
-          
-          if (regex.test(currentCode)) {
-              return { newCode: currentCode.replace(regex, newSnippet), success: true };
-          }
-      } catch (e) {
-          // Regex falhou ou muito complexo
-      }
+  if (patch.action === 'delete') {
+      return { newCode: '', success: true };
   }
 
-  // 4. Estratégia C: Injeção de Segurança (Append)
-  // Se não achou onde substituir, mas é código válido, tenta adicionar no final
-  // ISSO EVITA A "TELA CINZA" de código corrompido no meio do arquivo
-  
-  // Se for CSS
-  if (newSnippet.includes('{') && newSnippet.includes('}') && !newSnippet.includes('function') && !newSnippet.includes('<') && (patch.targetFile.endsWith('.css') || currentCode.includes('</style>'))) {
-      if (currentCode.includes('</style>')) {
-          return { newCode: currentCode.replace('</style>', `\n/* IA UPDATE */\n${newSnippet}\n</style>`), success: true };
-      }
-      return { newCode: currentCode + '\n' + newSnippet, success: true };
-  }
-  
-  // Se for JS (Funções ou Variáveis)
-  if ((newSnippet.includes('function ') || newSnippet.includes('const ') || newSnippet.includes('class ')) && !newSnippet.includes('</script>')) {
-      if (currentCode.includes('</script>')) {
-           const lastScript = currentCode.lastIndexOf('</script>');
-           const before = currentCode.substring(0, lastScript);
-           const after = currentCode.substring(lastScript);
-           return { newCode: `${before}\n// IA ADDITION\n${newSnippet}\n${after}`, success: true };
-      }
+  if (!originalSnippet) {
+      // If no original snippet provided for update, try fallback injection
+      const injected = fallbackInject(currentCode, patch);
+      if (injected) return { newCode: injected, success: true };
+      return { newCode: currentCode, success: false, error: "Snippet original ausente." };
   }
 
-  // 5. Se nada funcionou, FALHA SEGURA.
-  // Melhor não aplicar o patch do que quebrar o jogo inteiro.
+  // 2. Strategy A: Exact Match (Fastest, Safest)
+  const exact = exactReplace(currentCode, originalSnippet, newSnippet);
+  if (exact) return { newCode: exact, success: true };
+
+  // 3. Strategy B: Token Sliding Window (The Savior)
+  // Ignores all punctuation differences, whitespace, indentation issues.
+  const fuzzy = tokenBasedReplace(currentCode, originalSnippet, newSnippet);
+  if (fuzzy) return { newCode: fuzzy, success: true };
+
+  // 4. Strategy C: Fallback Injection (Last Resort)
+  // If we really can't find where to put it, but it looks like a new feature, append it.
+  const injected = fallbackInject(currentCode, patch);
+  if (injected) {
+      console.warn("Patch applied via Fallback Injection (Append)");
+      return { newCode: injected, success: true };
+  }
+
+  // 5. Fail
+  console.warn("Patch failed completely:", patch.description);
+  console.log("Original Snippet causing fail:", originalSnippet);
   return { 
       newCode: currentCode, 
       success: false, 
-      error: "Local exato não encontrado. Patch abortado para evitar corrupção." 
+      error: "Could not locate original snippet. Even fuzzy match failed." 
   };
+};
+
+export const formatHTML = (html: string): string => {
+  return html;
 };

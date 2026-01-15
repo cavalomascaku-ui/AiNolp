@@ -70,6 +70,12 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
             return match;
         });
 
+        // FIX SCRIPT ERROR: Adiciona crossorigin="anonymous" em scripts externos para permitir pegar erros detalhados
+        html = html.replace(/<script([^>]+)src=["'](https?:\/\/[^"']+)["']([^>]*)><\/script>/gi, (match, attrs1, src, attrs2) => {
+            if (match.toLowerCase().includes('crossorigin')) return match;
+            return `<script${attrs1}src="${src}" crossorigin="anonymous"${attrs2}></script>`;
+        });
+
         // --- 3. INJEÇÃO DE SISTEMA (CSS de Layout & Error Handling) ---
         // Game Mode: Trava scroll e centraliza.
         // Web Mode: NÃO TOCA NO SCROLL. Deixa nativo.
@@ -78,7 +84,11 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
             : `/* Web Mode: Reset mínimo para tirar margens brancas, mas mantendo scroll */ body{margin:0; min-height:100vh;} ::-webkit-scrollbar{width:8px;} ::-webkit-scrollbar-thumb{background:#555;border-radius:4px;} ::-webkit-scrollbar-track{background:#222;}`;
 
         const systemScript = `
-            window.onerror = (m,s,l,c,e) => window.parent.postMessage({type:'PREVIEW_ERROR',payload:{message:m,line:l}},'*');
+            window.onerror = (m,s,l,c,e) => {
+                // Filtra erros inúteis de Script error se não houver info
+                if (m === 'Script error.' && !l) return;
+                window.parent.postMessage({type:'PREVIEW_ERROR',payload:{message:m,line:l}},'*');
+            };
             // Captura cliques em links internos
             document.addEventListener('click', (e) => {
                 const a = e.target.closest('a');
