@@ -27,9 +27,8 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
         );
 
         // --- MUDANÇA PRINCIPAL: LÓGICA DE DETECÇÃO DE ARQUIVO HTML ---
-        // 1. Se o arquivo ativo for HTML, usa ele (Isso resolve seu problema do "meujogo.html")
+        // 1. Se o arquivo ativo for HTML, usa ele
         let htmlFilename = '';
-        
         if (activeFilename && activeFilename.endsWith('.html') && files[activeFilename]) {
             htmlFilename = activeFilename;
         } else {
@@ -56,14 +55,10 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
 
             // Helper para encontrar arquivos ignorando ./ ou /
             const getFileContent = (path: string) => {
-                const cleanPath = path.split('?')[0].split('#')[0]; // Remove query params
-                // Tenta exato
+                const cleanPath = path.split('?')[0].split('#')[0]; 
                 if (files[cleanPath]) return files[cleanPath];
-                // Tenta sem ./
                 if (cleanPath.startsWith('./') && files[cleanPath.slice(2)]) return files[cleanPath.slice(2)];
-                // Tenta sem / inicial
                 if (cleanPath.startsWith('/') && files[cleanPath.slice(1)]) return files[cleanPath.slice(1)];
-                // Tenta matching "burro" (só pelo nome do arquivo)
                 const justName = cleanPath.split('/').pop();
                 if (justName) {
                     const match = Object.keys(files).find(f => f.endsWith(justName));
@@ -83,14 +78,10 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
 
             // 2. Injetar JS (<script src="..."> -> <script>...</script>)
             processedHtml = processedHtml.replace(/<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/gi, (match, src) => {
-                // Ignora CDN
                 if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('//')) return match;
-                
                 const js = getFileContent(src);
                 if (js) {
-                    // Remove src, mantém outros atributos (id, class, type, etc)
                     const openTag = match.replace(/src=["'][^"']+["']/, '').replace('><', '>');
-                    // Remove fechamento antigo se tiver ficado bugado no replace
                     const cleanOpenTag = openTag.split('>')[0] + '>'; 
                     return `${cleanOpenTag}\n// Injected: ${src}\n${js}\n</script>`;
                 }
@@ -123,7 +114,6 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
         const scriptMatch = htmlContent.match(/<script[^>]+src=["']([^"']+)["'][^>]*>/);
         if (scriptMatch && scriptMatch[1]) {
             entryPoint = scriptMatch[1];
-             // Normaliza path
              if (entryPoint.startsWith('./')) entryPoint = entryPoint.slice(2);
         }
         
@@ -132,8 +122,12 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
              entryPoint = possibleEntries.find(e => files[e]) || '';
         }
 
-        // Remove o script original que chamava o entry point para não dar 404
+        // 3. LIMPEZA CRÍTICA: Remover imports antigos que causam conflito e scripts de entrada
         let cleanHtml = htmlContent;
+        
+        // REMOVE IMPORTMAPS DO USUÁRIO QUE PODEM CONTER VERSÕES INVÁLIDAS (ex: carets ^)
+        cleanHtml = cleanHtml.replace(/<script type="importmap">[\s\S]*?<\/script>/gi, '');
+        
         if (entryPoint) {
              const regex = new RegExp(`<script[^>]+src=["'].*?${entryPoint.replace('.', '\\.')}["'][^>]*><\\/script>`, 'i');
              cleanHtml = cleanHtml.replace(regex, '');
@@ -178,7 +172,6 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
                     let path = stack.join('/');
                     if (path.startsWith('/')) path = path.slice(1);
                     
-                    // Extensões
                     if (files[path]) return path;
                     if (files[path + '.tsx']) return path + '.tsx';
                     if (files[path + '.ts']) return path + '.ts';
@@ -189,7 +182,7 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
 
                 // 3. BOOTSTRAPPER
                 async function boot() {
-                    const registry = {}; // filename -> blobUrl
+                    const registry = {}; 
 
                     // A. Injetar CSS
                     Object.keys(files).filter(f => f.endsWith('.css')).forEach(f => {
@@ -198,45 +191,49 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
                         document.head.appendChild(style);
                     });
 
-                    // B. Transpilar e Preparar Blobs
+                    // B. Transpilar
                     const modules = Object.keys(files).filter(f => f.match(/\.(t|j)sx?$/));
-                    
                     const transpiled = {};
+                    
                     modules.forEach(f => {
                          try {
+                            // Presets seguros para React 18
                             transpiled[f] = Babel.transform(files[f], {
                                 filename: f,
                                 presets: ['react', 'typescript', ['env', { modules: false }]]
                             }).code;
-                         } catch (e) { transpiled[f] = files[f]; }
+                         } catch (e) { 
+                            console.error("Babel Error:", e);
+                            transpiled[f] = files[f]; 
+                         }
                     });
 
-                    // Import Maps com Blob URLs
+                    // C. Import Maps Controlado (Fixes "Unexpected token ^")
+                    // Usamos versões exatas para garantir estabilidade no preview
                     const importMap = { imports: {} };
                     
-                    // Mapeia libs externas
                     importMap.imports["react"] = "https://esm.sh/react@18.2.0";
                     importMap.imports["react-dom/client"] = "https://esm.sh/react-dom@18.2.0/client";
+                    importMap.imports["react-dom"] = "https://esm.sh/react-dom@18.2.0";
                     
                     // Mapeia locais
                     const blobUrls = {};
                     modules.forEach(f => {
                          let code = transpiled[f];
-                         // Truque: Transformar imports relativos em absolutos "fake"
+                         // Truque: Transformar imports relativos em absolutos "fake" para o importmap
                          code = code.replace(/from\s+['"]\.\/([^'"]+)['"]/g, 'from "/$1"');
-                         code = code.replace(/from\s+['"]\.\.\/([^'"]+)['"]/g, 'from "/$1"'); // Simplificado
+                         code = code.replace(/from\s+['"]\.\.\/([^'"]+)['"]/g, 'from "/$1"');
                          
                          const b = new Blob([code], {type: 'text/javascript'});
                          blobUrls[f] = URL.createObjectURL(b);
                          
-                         // Adiciona ao ImportMap (com e sem extensão para garantir)
                          const key = '/' + f.replace(/\.(tsx|jsx|ts|js)$/, '');
                          importMap.imports[key] = blobUrls[f];
                          importMap.imports[key + '.js'] = blobUrls[f];
                          importMap.imports[key + '.tsx'] = blobUrls[f];
                     });
 
-                    // Injeta Import Map
+                    // Injeta Import Map Seguro
                     const mapEl = document.createElement('script');
                     mapEl.type = 'importmap';
                     mapEl.textContent = JSON.stringify(importMap);
@@ -245,7 +242,11 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
                     // Carrega Entry Point
                     if (entry) {
                          const entryName = '/' + entry.replace(/\.(tsx|jsx|ts|js)$/, '');
-                         import(entryName).catch(e => console.error(e));
+                         console.log("Booting React from:", entryName);
+                         import(entryName).catch(e => {
+                             console.error("Boot Error:", e);
+                             document.body.innerHTML += '<div style="color:red;padding:20px">Erro ao iniciar aplicação React:<br>' + e.message + '</div>';
+                         });
                     } else {
                         document.body.innerHTML += '<h3 style="color:red">Entry point (main.tsx) não encontrado.</h3>';
                     }
@@ -262,7 +263,7 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
         setError(err.message);
         return '';
     }
-  }, [files, activeFilename, refreshKey]); // ActiveFilename agora é crítico
+  }, [files, activeFilename, refreshKey]);
 
   // Clean up blobs
   useEffect(() => {

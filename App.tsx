@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, ErrorInfo, ReactNode, Component } from 'react';
+import React, { useState, useEffect, useRef, ErrorInfo, ReactNode } from 'react';
 import { CodeEditor } from './components/Editor';
 import { Preview } from './components/Preview';
 import { AgentStatusOverlay } from './components/AgentStatus';
@@ -19,7 +19,7 @@ interface ErrorBoundaryState {
 }
 
 // --- ERROR BOUNDARY (Proteção contra Tela Preta) ---
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public state: ErrorBoundaryState = { hasError: false, error: null };
   
   constructor(props: ErrorBoundaryProps) {
@@ -203,7 +203,7 @@ function AppContent() {
   const [showTools, setShowTools] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false); 
   const [isThinkingMode, setIsThinkingMode] = useState(false);
-  const [showGitHubModal, setShowGitHubModal] = useState(false); // NEW STATE
+  const [showGitHubModal, setShowGitHubModal] = useState(false);
   
   const [isGameMode, setIsGameMode] = useState(() => {
     if (typeof localStorage !== 'undefined') {
@@ -332,7 +332,7 @@ function AppContent() {
         const zip = new JSZip();
         try {
             const content = await zip.loadAsync(file);
-            let newFiles: ProjectFiles = {}; // Changed to let to allow modification
+            let newFiles: ProjectFiles = {}; 
             let mainFile = '';
             const entries = Object.entries(content.files);
             for (const [relativePath, zipEntry] of entries) {
@@ -340,7 +340,6 @@ function AppContent() {
                 if (entry.dir) continue;
                 if (relativePath.includes('__MACOSX') || relativePath.includes('.DS_Store')) continue;
                 
-                // EXTENDED EXTENSIONS SUPPORT
                 const ext = relativePath.split('.').pop()?.toLowerCase();
                 if (['html', 'htm', 'css', 'js', 'json', 'txt', 'md', 'xml', 'svg', 'jsx', 'tsx', 'ts'].includes(ext || '')) {
                     const text = await entry.async('string');
@@ -351,13 +350,12 @@ function AppContent() {
                 }
             }
 
-            // AUTO-FLATTEN
             const keys = Object.keys(newFiles);
             if (keys.length > 0) {
                 const firstKey = keys[0];
                 const slashIndex = firstKey.indexOf('/');
                 if (slashIndex > -1) {
-                    const potentialRoot = firstKey.substring(0, slashIndex + 1); // e.g., "MyGame/"
+                    const potentialRoot = firstKey.substring(0, slashIndex + 1); 
                     const allStartWithRoot = keys.every(k => k.startsWith(potentialRoot));
                     
                     if (allStartWithRoot) {
@@ -367,7 +365,6 @@ function AppContent() {
                         }
                         newFiles = strippedFiles;
                         
-                        // Re-evaluate main file after stripping
                         mainFile = '';
                         const strippedKeys = Object.keys(newFiles);
                         if (strippedKeys.includes('index.html')) mainFile = 'index.html';
@@ -413,7 +410,6 @@ function AppContent() {
     e.target.value = '';
   };
   
-  // IMPLEMENTING MISSING FUNCTIONS
   const filteredFiles = Object.keys(files).filter(f => f.toLowerCase().includes(fileSearch.toLowerCase())).sort();
 
   const handleChatAttachmentSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -558,12 +554,6 @@ function AppContent() {
           <button onClick={() => setIsGameMode(!isGameMode)} className={`flex items-center justify-center w-8 h-8 rounded-md border transition-all ${isGameMode ? 'bg-indigo-900/10 border-indigo-900 text-indigo-400 hover:bg-indigo-900/30' : 'bg-emerald-900/10 border-emerald-900 text-emerald-400 hover:bg-emerald-900/30'}`} title={isGameMode ? "Modo Criação de Jogos (Sem Scroll)" : "Modo Web Dev (Com Scroll)"} > 
              {isGameMode ? <Gamepad2 className="w-4 h-4" /> : <Globe className="w-4 h-4" />} 
           </button>
-          
-          <div className="relative ml-2">
-              <button onClick={() => setShowGitHubModal(true)} className="flex items-center justify-center w-8 h-8 rounded-md border bg-black border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-white transition-all" title="Sincronizar com GitHub">
-                <Github className="w-4 h-4" />
-              </button>
-          </div>
 
           <div className="flex bg-zinc-900 rounded-md border border-zinc-800 p-0.5 ml-2">
             <button onClick={() => setPlatformTarget('mobile')} className={`p-1.5 rounded transition-colors ${platformTarget === 'mobile' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`} title="Mobile Only (Touch)"><Smartphone className="w-3.5 h-3.5" /></button>
@@ -586,7 +576,6 @@ function AppContent() {
           </div>
         </div>
         
-        {/* ... (Existing Right Header content: Undo/Redo, Menu, etc.) ... */}
         <div className="flex items-center gap-2">
             <div className="flex items-center bg-black rounded-md border border-zinc-800 shadow-sm overflow-hidden mr-1">
                 <button onClick={handleUndo} disabled={historyIndex === 0 || agentStatus.isActive} className="p-2 hover:bg-zinc-900 text-zinc-400 disabled:opacity-30 border-r border-zinc-800"><Undo2 className="w-4 h-4" /></button>
@@ -605,10 +594,13 @@ function AppContent() {
                                 {llmProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'}
                             </span>
                         </div>
+                        <button onClick={() => { setShowGitHubModal(true); setShowMainMenu(false); }} className="flex items-center gap-3 px-3 py-2.5 text-xs text-left hover:bg-zinc-800 rounded-md text-white group">
+                            <Github className="w-4 h-4 text-zinc-400 group-hover:text-white transition-colors" /> Sincronizar com GitHub
+                        </button>
+                        <div className="h-px bg-zinc-800 my-1"></div>
                         <button onClick={() => { setShowSettingsModal(true); setShowMainMenu(false); }} className="flex items-center gap-3 px-3 py-2.5 text-xs text-left hover:bg-zinc-800 rounded-md text-zinc-300">
                             <Settings className="w-4 h-4 text-zinc-500" /> Configurações & API
                         </button>
-                        <div className="h-px bg-zinc-800 my-1"></div>
                         <button onClick={() => { setShowDownloadModal(true); setShowMainMenu(false); }} className="flex items-center gap-3 px-3 py-2.5 text-xs text-left hover:bg-zinc-800 rounded-md text-zinc-300">
                             <Download className="w-4 h-4 text-emerald-500" /> Baixar Projeto (ZIP)
                         </button>
