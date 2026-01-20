@@ -3,14 +3,19 @@ import { AiResponse, ProjectFiles, Attachment, CodePatch, PlatformTarget } from 
 
 // Função auxiliar para obter a API Key
 const getApiKey = (provider: 'google' | 'openrouter') => {
-  let apiKey = process.env.API_KEY; 
+  let apiKey =
+    (typeof process !== 'undefined' &&
+     (process as any).env &&
+     (process as any).env.API_KEY) ||
+    "AIzaSyBpk0EDsR4c4Dbx4g1qh-58U9rXcFlA7kA";
+
   if (typeof localStorage !== 'undefined') {
     const customKey = localStorage.getItem('custom_gemini_api_key');
     if (customKey && customKey.trim().length > 0) apiKey = customKey;
   }
-  return apiKey || ''; 
-};
 
+  return apiKey || '';
+};
 // Mantendo o modelo Pro para melhor lógica de código
 const GOOGLE_MODEL = 'gemini-3-pro-preview'; 
 
