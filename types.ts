@@ -1,4 +1,3 @@
-
 export interface CodePatch {
   targetFile: string; // Nome do arquivo alvo (ex: 'index.html', 'admin.html')
   action: 'update' | 'create' | 'delete';
@@ -96,12 +95,29 @@ export interface EditorThemeColors {
   number: string;
 }
 
-export type SearchSourceType = 'lexica' | 'web' | 'reddit' | 'opengameart' | 'itchio' | 'deviantart';
+export type SearchSourceType = 'lexica' | 'web' | 'reddit' | 'opengameart' | 'itchio' | 'deviantart' | 'sketchfab';
 
 export interface ImageResult {
-  url: string;
+  url: string; // Para 3D, isso será o link de embed ou página
   title: string;
   type: 'image' | 'gif' | 'model3d';
   source?: string;
-  thumbnail?: string;
+  thumbnail?: string; // Obrigatório para 3D
+  embedHtml?: string; // HTML pré-fabricado para facilitar para a IA
+}
+
+export interface GitHubUser {
+  login: string;
+  avatar_url: string;
+  html_url: string;
+}
+
+export interface GitHubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  html_url: string;
+  default_branch: string;
+  updated_at: string;
 }

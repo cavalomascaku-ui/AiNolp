@@ -1,6 +1,5 @@
-
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { Maximize, Minimize, RefreshCw, ExternalLink, Smartphone, Monitor, AlertTriangle } from 'lucide-react';
+import { Maximize, Minimize, ExternalLink, Smartphone, Monitor, Code2, FileCode, RefreshCw } from 'lucide-react';
 import { ProjectFiles } from '../types';
 
 interface PreviewProps {
@@ -15,176 +14,310 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [blobUrl, setBlobUrl] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
 
-  // --- 1. RESOLVER ARQUIVO DE ENTRADA ---
-  const getEntryFile = () => {
-     // Se o arquivo ativo for HTML, usa ele.
-     if (activeFilename && activeFilename.endsWith('.html')) return activeFilename;
-     // Se não, procura index.html
-     if (files['index.html']) return 'index.html';
-     // Se não, pega o primeiro HTML que achar
-     return Object.keys(files).find(f => f.endsWith('.html')) || '';
-  };
-
-  // --- 2. BUNDLER (O SEGREDO DA TELA BRANCA) ---
-  const bundledHtml = useMemo(() => {
+  // --- 1. CORE: UNIFIED BUNDLER ---
+  const generatedBlobUrl = useMemo(() => {
+    setError(null);
     try {
-        const entryFile = getEntryFile();
-        if (!entryFile || !files[entryFile]) {
-            return `<!DOCTYPE html><html><body style="background:#000;color:#666;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;">
-                <div style="text-align:center;color:#666;">
-                    <h3>Procurando entry point...</h3>
-                    <p>Nenhum arquivo HTML principal encontrado.</p>
-                </div>
-            </body></html>`;
+        // A. DETECTAR TIPO DE PROJETO (React vs Vanilla)
+        const isReactApp = Object.keys(files).some(f => 
+            f.match(/\.(t|j)sx$/) || 
+            (f.endsWith('.js') && (files[f].includes('import React') || files[f].includes('from "react"')))
+        );
+
+        // --- MUDANÇA PRINCIPAL: LÓGICA DE DETECÇÃO DE ARQUIVO HTML ---
+        // 1. Se o arquivo ativo for HTML, usa ele (Isso resolve seu problema do "meujogo.html")
+        let htmlFilename = '';
+        
+        if (activeFilename && activeFilename.endsWith('.html') && files[activeFilename]) {
+            htmlFilename = activeFilename;
+        } else {
+            // 2. Se não, tenta index.html
+            if (files['index.html']) htmlFilename = 'index.html';
+            // 3. Se não, pega o primeiro HTML que encontrar
+            else htmlFilename = Object.keys(files).find(f => f.endsWith('.html')) || '';
         }
 
-        let html = files[entryFile];
+        let htmlContent = files[htmlFilename] || '';
 
-        // INLINER DE CSS: Procura <link href="..."> e troca pelo conteúdo do arquivo CSS
-        html = html.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
-            if (href.includes('://')) return match; // Ignora links externos (CDN)
-            
-            // Limpa query strings (?v=1) e ./
-            const cleanPath = href.split('?')[0].replace(/^\.\//, '');
-            
-            // Tenta achar o arquivo no projeto
-            const fileContent = files[cleanPath] || files['css/' + cleanPath] || files['styles/' + cleanPath];
-            
-            if (fileContent) {
-                return `<style>/* Injected from ${cleanPath} */\n${fileContent}</style>`;
-            }
-            return match;
-        });
+        // Se não tiver HTML mas for React, cria um esqueleto
+        if (!htmlContent && isReactApp) {
+            htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>App</title><style>body{margin:0;background:#000;color:#fff;}</style></head><body><div id="root"></div></body></html>`;
+        } else if (!htmlContent) {
+             return URL.createObjectURL(new Blob([`<!DOCTYPE html><html><body style="background:#000;color:#666;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;"><h3>Nenhum arquivo .html encontrado.</h3></body></html>`], { type: 'text/html' }));
+        }
 
-        // INLINER DE JS: Procura <script src="..."> e troca pelo conteúdo do arquivo JS
-        html = html.replace(/<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/gi, (match, src) => {
-            if (src.includes('://')) return match; // Ignora scripts externos (CDN)
+        // =================================================================================
+        // ESTRATÉGIA 1: INLINER AGRESSIVO (Para HTML/JS/Jogos Simples)
+        // =================================================================================
+        if (!isReactApp) {
+            let processedHtml = htmlContent;
 
-            const cleanPath = src.split('?')[0].replace(/^\.\//, '');
-            const fileContent = files[cleanPath] || files['js/' + cleanPath] || files['scripts/' + cleanPath];
-            
-            if (fileContent) {
-                return `<script>/* Injected from ${cleanPath} */\n${fileContent}</script>`;
-            }
-            return match;
-        });
-
-        // FIX SCRIPT ERROR: Adiciona crossorigin="anonymous" em scripts externos para permitir pegar erros detalhados
-        html = html.replace(/<script([^>]+)src=["'](https?:\/\/[^"']+)["']([^>]*)><\/script>/gi, (match, attrs1, src, attrs2) => {
-            if (match.toLowerCase().includes('crossorigin')) return match;
-            return `<script${attrs1}src="${src}" crossorigin="anonymous"${attrs2}></script>`;
-        });
-
-        // --- 3. INJEÇÃO DE SISTEMA (CSS de Layout & Error Handling) ---
-        // Game Mode: Trava scroll e centraliza.
-        // Web Mode: NÃO TOCA NO SCROLL. Deixa nativo.
-        const systemCss = isGameMode 
-            ? `html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;display:flex;justify-content:center;align-items:center;color:#fff;} canvas{max-width:100%;max-height:100%;object-fit:contain;}`
-            : `/* Web Mode: Reset mínimo para tirar margens brancas, mas mantendo scroll */ body{margin:0; min-height:100vh;} ::-webkit-scrollbar{width:8px;} ::-webkit-scrollbar-thumb{background:#555;border-radius:4px;} ::-webkit-scrollbar-track{background:#222;}`;
-
-        const systemScript = `
-            window.onerror = (m,s,l,c,e) => {
-                // Filtra erros inúteis de Script error se não houver info
-                if (m === 'Script error.' && !l) return;
-                window.parent.postMessage({type:'PREVIEW_ERROR',payload:{message:m,line:l}},'*');
+            // Helper para encontrar arquivos ignorando ./ ou /
+            const getFileContent = (path: string) => {
+                const cleanPath = path.split('?')[0].split('#')[0]; // Remove query params
+                // Tenta exato
+                if (files[cleanPath]) return files[cleanPath];
+                // Tenta sem ./
+                if (cleanPath.startsWith('./') && files[cleanPath.slice(2)]) return files[cleanPath.slice(2)];
+                // Tenta sem / inicial
+                if (cleanPath.startsWith('/') && files[cleanPath.slice(1)]) return files[cleanPath.slice(1)];
+                // Tenta matching "burro" (só pelo nome do arquivo)
+                const justName = cleanPath.split('/').pop();
+                if (justName) {
+                    const match = Object.keys(files).find(f => f.endsWith(justName));
+                    if (match) return files[match];
+                }
+                return null;
             };
-            // Captura cliques em links internos
-            document.addEventListener('click', (e) => {
-                const a = e.target.closest('a');
-                if(a){
-                    const href = a.getAttribute('href');
-                    if(href && !href.startsWith('http') && !href.startsWith('#')) {
-                        e.preventDefault();
-                        window.parent.postMessage({type:'LINK_CLICK',payload:href},'*');
+
+            // 1. Injetar CSS (<link rel="stylesheet"> -> <style>)
+            processedHtml = processedHtml.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
+                if (href.includes('stylesheet')) {
+                    const css = getFileContent(href);
+                    if (css) return `<style>/* ${href} */\n${css}</style>`;
+                }
+                return match;
+            });
+
+            // 2. Injetar JS (<script src="..."> -> <script>...</script>)
+            processedHtml = processedHtml.replace(/<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/gi, (match, src) => {
+                // Ignora CDN
+                if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('//')) return match;
+                
+                const js = getFileContent(src);
+                if (js) {
+                    // Remove src, mantém outros atributos (id, class, type, etc)
+                    const openTag = match.replace(/src=["'][^"']+["']/, '').replace('><', '>');
+                    // Remove fechamento antigo se tiver ficado bugado no replace
+                    const cleanOpenTag = openTag.split('>')[0] + '>'; 
+                    return `${cleanOpenTag}\n// Injected: ${src}\n${js}\n</script>`;
+                }
+                return match;
+            });
+
+            // 3. Adicionar Error Handler Simples
+            const errScript = `<script>window.onerror = function(e){ console.error("Preview Error:", e); };</script>`;
+            if (processedHtml.includes('<head>')) {
+                processedHtml = processedHtml.replace('<head>', `<head>${errScript}`);
+            } else {
+                processedHtml = errScript + processedHtml;
+            }
+
+            return URL.createObjectURL(new Blob([processedHtml], { type: 'text/html' }));
+        }
+
+        // =================================================================================
+        // ESTRATÉGIA 2: VIRTUAL LOADER (Para React/TypeScript/Modules)
+        // =================================================================================
+        
+        // Sanitiza o JSON para injetar no HTML sem quebrar a string
+        const safeFiles = JSON.stringify(files).replace(/<\/script>/g, '<\\/script>');
+        
+        // Determina Entry Point
+        let entryPoint = '';
+        const possibleEntries = ['main.tsx', 'src/main.tsx', 'index.tsx', 'src/index.tsx', 'main.jsx', 'src/main.jsx', 'index.jsx', 'src/index.jsx'];
+        
+        // 1. Tenta achar no script src do HTML
+        const scriptMatch = htmlContent.match(/<script[^>]+src=["']([^"']+)["'][^>]*>/);
+        if (scriptMatch && scriptMatch[1]) {
+            entryPoint = scriptMatch[1];
+             // Normaliza path
+             if (entryPoint.startsWith('./')) entryPoint = entryPoint.slice(2);
+        }
+        
+        // 2. Se não achou, tenta os padrões
+        if (!entryPoint || !files[entryPoint]) {
+             entryPoint = possibleEntries.find(e => files[e]) || '';
+        }
+
+        // Remove o script original que chamava o entry point para não dar 404
+        let cleanHtml = htmlContent;
+        if (entryPoint) {
+             const regex = new RegExp(`<script[^>]+src=["'].*?${entryPoint.replace('.', '\\.')}["'][^>]*><\\/script>`, 'i');
+             cleanHtml = cleanHtml.replace(regex, '');
+             cleanHtml = cleanHtml.replace(/<script type="module".*?<\/script>/gi, ''); // Limpa outros modules
+        }
+
+        const bootloader = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <script>
+                window.process = { env: { NODE_ENV: 'development' } };
+                window.onerror = (msg, url, line) => {
+                    const div = document.createElement('div');
+                    div.style = 'position:fixed;top:0;left:0;right:0;background:rgba(200,0,0,0.9);color:white;padding:10px;font-family:monospace;z-index:9999';
+                    div.innerHTML = '<strong>Runtime Error:</strong> ' + msg + ' (Line ' + line + ')';
+                    document.body.appendChild(div);
+                };
+            </script>
+            <!-- Babel Standalone -->
+            <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+        </head>
+        <body>
+            ${cleanHtml.replace(/<!DOCTYPE html>|<html[^>]*>|<head>[\s\S]*?<\/head>|<body[^>]*>|<\/body>|<\/html>/gi, '')}
+            
+            <script>
+                // 1. FILESYSTEM VIRTUAL
+                const files = ${safeFiles};
+                const entry = "${entryPoint}";
+
+                // 2. HELPER DE RESOLUÇÃO
+                function resolve(base, relative) {
+                    const stack = base.split('/');
+                    stack.pop();
+                    const parts = relative.split('/');
+                    for (let p of parts) {
+                        if (p === '.') continue;
+                        if (p === '..') stack.pop();
+                        else stack.push(p);
+                    }
+                    let path = stack.join('/');
+                    if (path.startsWith('/')) path = path.slice(1);
+                    
+                    // Extensões
+                    if (files[path]) return path;
+                    if (files[path + '.tsx']) return path + '.tsx';
+                    if (files[path + '.ts']) return path + '.ts';
+                    if (files[path + '.jsx']) return path + '.jsx';
+                    if (files[path + '.js']) return path + '.js';
+                    return path;
+                }
+
+                // 3. BOOTSTRAPPER
+                async function boot() {
+                    const registry = {}; // filename -> blobUrl
+
+                    // A. Injetar CSS
+                    Object.keys(files).filter(f => f.endsWith('.css')).forEach(f => {
+                        const style = document.createElement('style');
+                        style.textContent = files[f];
+                        document.head.appendChild(style);
+                    });
+
+                    // B. Transpilar e Preparar Blobs
+                    const modules = Object.keys(files).filter(f => f.match(/\.(t|j)sx?$/));
+                    
+                    const transpiled = {};
+                    modules.forEach(f => {
+                         try {
+                            transpiled[f] = Babel.transform(files[f], {
+                                filename: f,
+                                presets: ['react', 'typescript', ['env', { modules: false }]]
+                            }).code;
+                         } catch (e) { transpiled[f] = files[f]; }
+                    });
+
+                    // Import Maps com Blob URLs
+                    const importMap = { imports: {} };
+                    
+                    // Mapeia libs externas
+                    importMap.imports["react"] = "https://esm.sh/react@18.2.0";
+                    importMap.imports["react-dom/client"] = "https://esm.sh/react-dom@18.2.0/client";
+                    
+                    // Mapeia locais
+                    const blobUrls = {};
+                    modules.forEach(f => {
+                         let code = transpiled[f];
+                         // Truque: Transformar imports relativos em absolutos "fake"
+                         code = code.replace(/from\s+['"]\.\/([^'"]+)['"]/g, 'from "/$1"');
+                         code = code.replace(/from\s+['"]\.\.\/([^'"]+)['"]/g, 'from "/$1"'); // Simplificado
+                         
+                         const b = new Blob([code], {type: 'text/javascript'});
+                         blobUrls[f] = URL.createObjectURL(b);
+                         
+                         // Adiciona ao ImportMap (com e sem extensão para garantir)
+                         const key = '/' + f.replace(/\.(tsx|jsx|ts|js)$/, '');
+                         importMap.imports[key] = blobUrls[f];
+                         importMap.imports[key + '.js'] = blobUrls[f];
+                         importMap.imports[key + '.tsx'] = blobUrls[f];
+                    });
+
+                    // Injeta Import Map
+                    const mapEl = document.createElement('script');
+                    mapEl.type = 'importmap';
+                    mapEl.textContent = JSON.stringify(importMap);
+                    document.head.appendChild(mapEl);
+
+                    // Carrega Entry Point
+                    if (entry) {
+                         const entryName = '/' + entry.replace(/\.(tsx|jsx|ts|js)$/, '');
+                         import(entryName).catch(e => console.error(e));
+                    } else {
+                        document.body.innerHTML += '<h3 style="color:red">Entry point (main.tsx) não encontrado.</h3>';
                     }
                 }
-            });
-        `;
 
-        // Injeta no head ou no começo do arquivo
-        const injection = `<style>${systemCss}</style><script>${systemScript}</script>`;
-        if (html.includes('</head>')) {
-            html = html.replace('</head>', injection + '</head>');
-        } else {
-            html = injection + html;
-        }
+                boot();
+            </script>
+        </body>
+        </html>`;
 
-        return html;
-    } catch (e: any) {
-        console.error("Preview Bundling Error:", e);
-        return `<!DOCTYPE html><html><body style="background:#111;color:#f00;font-family:monospace;padding:20px;">
-            <h3>Internal Preview Error</h3>
-            <p>${e.message}</p>
-        </body></html>`;
+        return URL.createObjectURL(new Blob([bootloader], { type: 'text/html' }));
+
+    } catch (err: any) {
+        setError(err.message);
+        return '';
     }
-  }, [files, activeFilename, isGameMode, refreshKey]);
+  }, [files, activeFilename, refreshKey]); // ActiveFilename agora é crítico
 
-  // --- 4. RENDERIZAÇÃO VIA BLOB URL (Estabilidade) ---
+  // Clean up blobs
   useEffect(() => {
-    if (blobUrl) URL.revokeObjectURL(blobUrl); // Limpa memória anterior
+    return () => {
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [blobUrl]);
 
-    const blob = new Blob([bundledHtml], { type: 'text/html' });
-    const newUrl = URL.createObjectURL(blob);
-    setBlobUrl(newUrl);
-
-    return () => URL.revokeObjectURL(newUrl);
-  }, [bundledHtml]);
-
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-        containerRef.current?.requestFullscreen();
-        setIsFullscreen(true);
-    } else {
-        document.exitFullscreen();
-        setIsFullscreen(false);
+  useEffect(() => {
+    if (generatedBlobUrl) {
+        setBlobUrl(generatedBlobUrl);
     }
+  }, [generatedBlobUrl]);
+
+  const openInNewTab = () => window.open(blobUrl, '_blank');
+  const toggleFullscreen = () => {
+      if (!document.fullscreenElement) {
+          containerRef.current?.requestFullscreen();
+          setIsFullscreen(true);
+      } else {
+          document.exitFullscreen();
+          setIsFullscreen(false);
+      }
   };
 
-  const openInNewTab = () => {
-      window.open(blobUrl, '_blank');
-  };
+  const isReact = Object.keys(files).some(f => f.match(/\.(t|j)sx$/));
+  const displayHtmlFile = activeFilename.endsWith('.html') ? activeFilename : (Object.keys(files).find(f => f.endsWith('index.html')) || 'index.html');
 
   return (
     <div ref={containerRef} className="flex flex-col w-full h-full bg-zinc-950 border-l border-zinc-900">
-      
-      {/* Barra de Ferramentas / Endereço */}
       <div className="flex-none h-10 bg-zinc-900 border-b border-zinc-800 flex items-center px-2 gap-2 shadow-sm z-10">
         <div className="flex gap-1.5 mr-2 opacity-60 hover:opacity-100 transition-opacity">
             <div className="w-2.5 h-2.5 rounded-full bg-red-500/50"></div>
             <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50"></div>
             <div className="w-2.5 h-2.5 rounded-full bg-green-500/50"></div>
         </div>
-
-        {/* Indicador de Arquivo */}
         <div className="flex-1 bg-black/40 border border-zinc-800/50 rounded flex items-center px-3 py-1 text-xs text-zinc-400 font-mono truncate hover:bg-black/60 transition-colors">
-            <span className="text-zinc-600 mr-2 select-none">preview://</span>
-            <span className="text-zinc-300">{getEntryFile()}</span>
+            {isReact ? <Code2 className="w-3.5 h-3.5 text-cyan-500 mr-2" /> : <FileCode className="w-3.5 h-3.5 text-orange-500 mr-2" />}
+            <span className="text-zinc-600 mr-1 select-none">preview://</span>
+            <span className="text-zinc-300">{displayHtmlFile}</span>
         </div>
-
-        {/* Badge de Modo */}
         <div className={`hidden sm:flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${isGameMode ? 'bg-indigo-950/30 border-indigo-500/30 text-indigo-400' : 'bg-emerald-950/30 border-emerald-500/30 text-emerald-400'}`}>
             {isGameMode ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
             {isGameMode ? 'Game Mode' : 'Web Mode'}
         </div>
-
         <div className="w-px h-4 bg-zinc-800 mx-1"></div>
-
-        {/* Botões de Ação */}
         <button onClick={openInNewTab} className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-md transition-colors" title="Abrir em Nova Aba (Debug)">
             <ExternalLink className="w-3.5 h-3.5" />
         </button>
-
         <button onClick={toggleFullscreen} className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-md transition-colors" title="Tela Cheia">
             {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
         </button>
       </div>
-
-      {/* Área do Iframe */}
       <div className="flex-1 relative w-full h-full bg-white/5 bg-[radial-gradient(#333_1px,transparent_1px)] [background-size:16px_16px]"> 
-        {/* Loader enquanto Blob carrega */}
         {!blobUrl && <div className="absolute inset-0 flex items-center justify-center text-zinc-500 text-xs">Carregando Preview...</div>}
-        
         {blobUrl && (
             <iframe
                 ref={iframeRef}
@@ -195,8 +328,12 @@ export const Preview: React.FC<PreviewProps> = ({ files, activeFilename, refresh
                 allow="accelerometer; camera; encrypted-media; geolocation; gyroscope; microphone; midi; clipboard-read; clipboard-write; fullscreen; autoplay"
             />
         )}
+        {error && (
+            <div className="absolute bottom-4 left-4 right-4 bg-red-900/90 text-white p-4 rounded-lg shadow-xl border border-red-500 text-xs font-mono whitespace-pre-wrap z-50">
+                <strong>PREVIEW ERROR:</strong><br/>{error}
+            </div>
+        )}
       </div>
-
     </div>
   );
 };

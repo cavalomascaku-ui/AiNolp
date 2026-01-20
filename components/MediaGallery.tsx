@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Image as ImageIcon, CheckCircle2, Loader2, Plus, ExternalLink, AlertTriangle, Box, Globe2, BookOpen, Sparkles, Filter, Grid, SlidersHorizontal, Feather, Layers, Camera, Palette, Hexagon, Film, Paperclip, Zap, Gamepad2, Scissors } from 'lucide-react';
+import { Search, Image as ImageIcon, CheckCircle2, Loader2, Plus, ExternalLink, AlertTriangle, Box, Globe2, BookOpen, Sparkles, Filter, Grid, SlidersHorizontal, Feather, Layers, Camera, Palette, Hexagon, Film, Paperclip, Zap, Gamepad2, Scissors, Cuboid } from 'lucide-react';
 import { ImageResult, SearchSourceType } from '../types';
 
 interface MediaGalleryProps {
@@ -32,23 +32,35 @@ const GalleryItem: React.FC<GalleryItemProps> = ({
     const is3D = img.type === 'model3d';
     const isGif = img.type === 'gif';
     
-    const friendlyDomains = ['reddit.com', 'redd.it', 'imgur.com', 'wikimedia.org', 'lexica.art', 'images.unsplash.com', 'media.giphy.com', 'itch.io', 'opengameart.org'];
-    const isFriendly = friendlyDomains.some(d => img.url.includes(d));
+    // Para Sketchfab, usamos a thumbnail fornecida, não a URL principal (que é o link do embed)
+    const displaySrc = is3D && img.thumbnail ? img.thumbnail : img.url;
+    
+    const friendlyDomains = ['reddit.com', 'redd.it', 'imgur.com', 'wikimedia.org', 'lexica.art', 'images.unsplash.com', 'media.giphy.com', 'itch.io', 'opengameart.org', 'sketchfab.com'];
+    const isFriendly = friendlyDomains.some(d => displaySrc.includes(d));
 
-    const initialSrc = (is3D || isFriendly) ? img.url : PROXY_1(img.url);
+    const initialSrc = (is3D || isFriendly) ? displaySrc : PROXY_1(displaySrc);
 
     const [imgSrc, setImgSrc] = useState(initialSrc);
     const [hasError, setHasError] = useState(false);
     const [retryStage, setRetryStage] = useState(0);
 
     const handleError = () => {
-        if (is3D) { setHasError(true); return; }
+        if (is3D) { 
+            // Se falhar thumbnail 3D, tenta proxy
+            if (retryStage === 0) {
+                setImgSrc(PROXY_2(displaySrc));
+                setRetryStage(1);
+            } else {
+                setHasError(true); 
+            }
+            return; 
+        }
 
         if (retryStage === 0 && !isFriendly) {
-            setImgSrc(img.url);
+            setImgSrc(displaySrc);
             setRetryStage(1);
         } else if (retryStage === 1 && !isFriendly) {
-            setImgSrc(PROXY_2(img.url));
+            setImgSrc(PROXY_2(displaySrc));
             setRetryStage(2);
         } else {
             setHasError(true);
@@ -70,27 +82,29 @@ const GalleryItem: React.FC<GalleryItemProps> = ({
         >
             <div className="absolute inset-0 bg-[url('https://res.cloudinary.com/practicaldev/image/fetch/s--K6g6k9rX--/c_limit%2Cf_auto%2Cfl_progressive%2Cq_auto%2Cw_880/https://dev-to-uploads.s3.amazonaws.com/i/1wwdyw5de8avrdkgtz5n.png')] opacity-10"></div>
             
-            {is3D ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900 text-zinc-500">
-                    <Box className="w-12 h-12 text-blue-500" />
-                    <span className="text-[9px] mt-2 font-mono bg-blue-900/30 text-blue-300 px-1 rounded">3D MODEL</span>
-                    <span className="text-[8px] mt-1 text-zinc-600 truncate max-w-[80%]">{getSourceDisplay(img.url)}</span>
+            {is3D && (
+                <div className="absolute top-2 left-2 z-30">
+                    <span className="text-[8px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1">
+                        <Cuboid className="w-2.5 h-2.5" /> 3D
+                    </span>
                 </div>
-            ) : (
-                <img 
-                    src={imgSrc} 
-                    alt={img.title}
-                    className={`absolute inset-0 w-full h-full object-contain p-2 z-10 transition-opacity duration-300 group-hover:scale-105 ${isGif ? 'bg-white/5' : ''}`}
-                    loading="lazy"
-                    onError={handleError}
-                />
             )}
+
+            <img 
+                src={imgSrc} 
+                alt={img.title}
+                className={`absolute inset-0 w-full h-full object-cover z-10 transition-transform duration-500 group-hover:scale-110 ${isGif ? 'bg-white/5' : ''}`}
+                loading="lazy"
+                onError={handleError}
+            />
             
-            <div className="absolute top-2 left-2 z-20">
-                 <div className={`bg-zinc-950/90 backdrop-blur-sm text-[8px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 border border-zinc-700/50 uppercase text-zinc-300`}>
-                     {img.source ? img.source.substring(0, 8) : 'WEB'}
-                 </div>
-            </div>
+            {!is3D && (
+                <div className="absolute top-2 left-2 z-20">
+                     <div className={`bg-zinc-950/90 backdrop-blur-sm text-[8px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 border border-zinc-700/50 uppercase text-zinc-300`}>
+                         {img.source ? img.source.substring(0, 8) : 'WEB'}
+                     </div>
+                </div>
+            )}
 
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/90 to-transparent p-3 pt-6 z-20 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end">
                 <p className="text-[10px] text-zinc-200 line-clamp-2 leading-tight">{img.title}</p>
@@ -112,6 +126,7 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({ onSearch, onIntegrat
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [hasSearched, setHasSearched] = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
 
   const FILTERS = [
       { id: 'transparent', label: 'Transparente (PNG)', icon: <Layers className="w-3 h-3" />, promptMod: 'transparent background png stickert' },
@@ -123,14 +138,14 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({ onSearch, onIntegrat
   ];
 
   const SOURCES: {id: SearchSourceType, label: string}[] = [
+      { id: 'sketchfab', label: 'Sketchfab (3D)' },
       { id: 'lexica', label: 'Lexica (IA)' },
       { id: 'web', label: 'Google' }, // Fallback to web
       { id: 'reddit', label: 'Reddit' },
       { id: 'opengameart', label: 'OpenGameArt' },
       { id: 'itchio', label: 'Itch.io' },
-      { id: 'deviantart', label: 'DeviantArt' }
   ];
-  const [activeSources, setActiveSources] = useState<SearchSourceType[]>(['lexica', 'web', 'reddit', 'opengameart', 'itchio']);
+  const [activeSources, setActiveSources] = useState<SearchSourceType[]>(['sketchfab', 'lexica', 'web']);
 
   // Handle external triggers (Auto-Search from AI)
   useEffect(() => {
@@ -140,11 +155,50 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({ onSearch, onIntegrat
       }
   }, [triggerQuery]);
 
+  const searchSketchfab = async (q: string): Promise<ImageResult[]> => {
+      try {
+          // Filtros: models, downloadable (para garantir que é um asset usável, embora vamos usar embed)
+          const url = `https://api.sketchfab.com/v3/search?type=models&q=${encodeURIComponent(q)}&sort_by=-likeCount`;
+          // Usando proxy para evitar CORS se necessário, embora a API search do Sketchfab geralmente aceite.
+          // Mas vamos usar proxy para garantir.
+          const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+          
+          const res = await fetch(proxyUrl);
+          if (!res.ok) return [];
+          const data = await res.json();
+          
+          if (!data.results) return [];
+
+          return data.results.map((r: any) => {
+              // Pegar a maior thumbnail disponível
+              const thumbnails = r.thumbnails.images.sort((a: any, b: any) => b.width - a.width);
+              const thumbUrl = thumbnails.length > 0 ? thumbnails[0].url : '';
+              
+              // Gerar código de embed
+              const embedUrl = `https://sketchfab.com/models/${r.uid}/embed?autostart=1&ui_controls=1&ui_infos=0&ui_inspector=0&ui_stop=0&ui_watermark=0&ui_watermark_link=0`;
+              const iframeCode = `<iframe title="${r.name}" frameborder="0" allowfullscreen mozallowfullscreen="true" webkitallowfullscreen="true" allow="autoplay; fullscreen; xr-spatial-tracking" xr-spatial-tracking execution-while-out-of-viewport execution-while-not-rendered web-share src="${embedUrl}"></iframe>`;
+
+              return {
+                  url: embedUrl, // URL principal é o embed
+                  title: r.name,
+                  type: 'model3d',
+                  source: 'sketchfab',
+                  thumbnail: thumbUrl,
+                  embedHtml: iframeCode
+              };
+          });
+      } catch (e) {
+          console.error("Sketchfab Error:", e);
+          return [];
+      }
+  };
+
   const handleSearch = async (overrideQuery?: string) => {
       const q = overrideQuery || query;
       if (!q.trim()) return;
       
       setHasSearched(true);
+      setLocalLoading(true);
       setResults([]);
       setSelectedIndices(new Set());
 
@@ -156,12 +210,28 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({ onSearch, onIntegrat
       });
 
       try {
-          // If "google" is selected, map to generic web search or specific logic inside service
-          const sourcesToUse = activeSources;
-          const imgs = await onSearch(finalQuery, activeFilters, sourcesToUse);
-          setResults(imgs);
+          const promises: Promise<ImageResult[]>[] = [];
+
+          // Se Sketchfab estiver ativo, busca em paralelo
+          if (activeSources.includes('sketchfab')) {
+              promises.push(searchSketchfab(q)); // Busca sketchfab usa a query original sem modificadores de imagem
+          }
+
+          // Busca nas outras fontes via callback principal
+          const otherSources = activeSources.filter(s => s !== 'sketchfab');
+          if (otherSources.length > 0) {
+              promises.push(onSearch(finalQuery, activeFilters, otherSources));
+          }
+
+          const resultsArray = await Promise.all(promises);
+          const flatResults = resultsArray.flat();
+          
+          // Shuffle leve para misturar fontes
+          setResults(flatResults.sort(() => Math.random() - 0.5));
       } catch (e) {
           console.error(e);
+      } finally {
+          setLocalLoading(false);
       }
   };
 
@@ -176,7 +246,11 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({ onSearch, onIntegrat
       const selectedImages = results.filter((_, i) => selectedIndices.has(i));
       // Adiciona flag se for sprite sheet para ajudar o prompt no App.tsx
       const isSpriteSheet = activeFilters.includes('spritesheet');
-      const enhancedQuery = isSpriteSheet ? query + " [TYPE: SPRITE_SHEET]" : query;
+      const has3D = selectedImages.some(i => i.type === 'model3d');
+      
+      let enhancedQuery = query;
+      if (isSpriteSheet) enhancedQuery += " [TYPE: SPRITE_SHEET]";
+      if (has3D) enhancedQuery += " [TYPE: 3D_MODEL_EMBED]";
       
       onIntegrate(selectedImages, enhancedQuery);
   };
@@ -193,17 +267,17 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({ onSearch, onIntegrat
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                        placeholder="Busque assets (ex: 'nave espacial pixel art')..."
+                        placeholder="Busque assets (ex: 'Soldado', 'Espada')..."
                         className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white focus:ring-2 focus:ring-pink-500/50 focus:outline-none placeholder:text-zinc-600"
                     />
                 </div>
 
                 <button 
                     onClick={() => handleSearch()}
-                    disabled={isSearching || !query.trim()}
+                    disabled={(isSearching || localLoading) || !query.trim()}
                     className="bg-pink-600 hover:bg-pink-500 disabled:opacity-50 text-white px-6 rounded-xl font-bold transition-all shadow-lg shadow-pink-900/20"
                 >
-                    {isSearching ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Buscar'}
+                    {(isSearching || localLoading) ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Buscar'}
                 </button>
             </div>
 
@@ -244,7 +318,7 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({ onSearch, onIntegrat
             {!hasSearched && results.length === 0 && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 opacity-50 pointer-events-none">
                     <ImageIcon className="w-16 h-16 mb-4" />
-                    <p className="text-sm">Busque texturas, sprites ou conceitos.</p>
+                    <p className="text-sm">Busque texturas, sprites ou modelos 3D.</p>
                 </div>
             )}
             
@@ -261,10 +335,10 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({ onSearch, onIntegrat
             </div>
 
             {/* Loading Overlay */}
-            {isSearching && (
+            {(isSearching || localLoading) && (
                 <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-50">
                     <Loader2 className="w-10 h-10 text-pink-500 animate-spin mb-3" />
-                    <p className="text-zinc-300 font-mono text-xs animate-pulse">RASTREANDO ASSETS...</p>
+                    <p className="text-zinc-300 font-mono text-xs animate-pulse">RASTREANDO ASSETS (Sketchfab & Web)...</p>
                 </div>
             )}
         </div>

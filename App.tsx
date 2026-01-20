@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, useRef, ErrorInfo, ReactNode, Component } from 'react';
 import { CodeEditor } from './components/Editor';
 import { Preview } from './components/Preview';
 import { AgentStatusOverlay } from './components/AgentStatus';
+import { GitHubModal } from './components/GitHubModal'; // NEW IMPORT
 import { analyzeAndEditCode, validateConnection } from './services/gemini';
 import { applyPatch, formatHTML } from './utils/patcher';
 import { ChatMessage, AppTab, AgentStatus, CodePatch, RuntimeError, ProjectFiles, AgentLog, PlatformTarget, EditorThemeColors, Attachment, AiResponse } from './types';
-import { Send, Code, Play, MessageSquare, Upload, Zap, Terminal, MonitorPlay, Sparkles, Download, Undo2, Redo2, AlertTriangle, Bug, BrainCircuit, X, Users, Wrench, ChevronDown, Trash2, Rocket, FilePlus, FileText, Layout, FolderOpen, Paperclip, FileImage, Loader2, CheckCircle2, Info, Package, PanelLeft, Search, File as FileIcon, Gamepad2, Globe, Copy, Layers, ShieldAlert, Clapperboard, Film, Lock, Unlock, CheckSquare, Square, RefreshCw, Sparkles as AiSparkles, Sword, Globe2, Plus, Image as ImageIcon, ExternalLink, Settings, KeyRound, Eye, EyeOff, Server, Cpu, Wifi, WifiOff, FileEdit, MoreVertical, Smartphone, Monitor, Laptop, Palette, BookOpen, StickyNote, FileCode, Check, PenTool, Lightbulb, ArrowRight } from 'lucide-react';
+import { Send, Code, Play, MessageSquare, Upload, Zap, Terminal, MonitorPlay, Sparkles, Download, Undo2, Redo2, AlertTriangle, Bug, BrainCircuit, X, Users, Wrench, ChevronDown, Trash2, Rocket, FilePlus, FileText, Layout, FolderOpen, Paperclip, FileImage, Loader2, CheckCircle2, Info, Package, PanelLeft, Search, File as FileIcon, Gamepad2, Globe, Copy, Layers, ShieldAlert, Clapperboard, Film, Lock, Unlock, CheckSquare, Square, RefreshCw, Sparkles as AiSparkles, Sword, Globe2, Plus, Image as ImageIcon, ExternalLink, Settings, KeyRound, Eye, EyeOff, Server, Cpu, Wifi, WifiOff, FileEdit, MoreVertical, Smartphone, Monitor, Laptop, Palette, BookOpen, StickyNote, FileCode, Check, PenTool, Lightbulb, ArrowRight, Github } from 'lucide-react';
 import JSZip from 'jszip';
 
 interface ErrorBoundaryProps {
@@ -19,7 +20,11 @@ interface ErrorBoundaryState {
 
 // --- ERROR BOUNDARY (Proteção contra Tela Preta) ---
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false, error: null };
+  public state: ErrorBoundaryState = { hasError: false, error: null };
+  
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+  }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -41,7 +46,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             <ShieldAlert className="w-16 h-16 text-red-500 mb-4" />
             <h2 className="text-2xl font-bold mb-2">Ops! Ocorreu um erro crítico.</h2>
             <p className="text-zinc-400 max-w-md mb-6 text-sm">
-                O aplicativo encontrou um problema inesperado (provavelmente ao processar um arquivo grande ou complexo).
+                O aplicativo encontrou um problema inesperado.
             </p>
             <div className="bg-zinc-900 p-4 rounded-lg border border-zinc-800 font-mono text-xs text-red-300 mb-6 max-w-lg w-full overflow-auto max-h-32">
                 {this.state.error?.message || 'Erro desconhecido'}
@@ -66,29 +71,49 @@ const INITIAL_FILES: ProjectFiles = {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { 
-            margin: 0; 
-            background: #000000; 
-            color: #ffffff; 
-            font-family: monospace; 
-            display: flex; 
-            flex-direction: column;
-            justify-content: center; 
-            align-items: center; 
-            height: 100vh; 
-            text-align: center;
-        }
-        h2 { font-weight: bold; color: #ffffff; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 2px; }
-        p { color: #888; }
+        body { margin: 0; background: #000; color: #fff; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
     </style>
 </head>
 <body>
-    <div>
-        <h2>Novo Projeto</h2>
-        <p>Aguardando instruções...</p>
-    </div>
+    <div id="root"></div>
+    <script type="module" src="main.tsx"></script>
 </body>
-</html>`
+</html>`,
+  'main.tsx': `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`,
+  'App.tsx': `import React, { useState } from 'react';
+
+export default function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div style={{textAlign: 'center'}}>
+      <h1>React + TypeScript</h1>
+      <p>Rodando direto no navegador!</p>
+      <button 
+        onClick={() => setCount(c => c + 1)}
+        style={{
+          padding: '10px 20px',
+          fontSize: '16px',
+          background: '#6366f1',
+          border: 'none',
+          color: 'white',
+          borderRadius: '5px',
+          cursor: 'pointer'
+        }}
+      >
+        Contador: {count}
+      </button>
+    </div>
+  );
+}`
 };
 
 const DEFAULT_CUSTOM_THEME: EditorThemeColors = {
@@ -104,54 +129,33 @@ const DEFAULT_CUSTOM_THEME: EditorThemeColors = {
 const FREE_OPENROUTER_MODELS = [
     { id: "google/gemini-2.0-flash-lite-preview-02-05:free", name: "Gemini 2.0 Flash Lite", tags: ["Rápido", "Geral", "Novo"], desc: "Modelo muito rápido e capaz do Google. Ótimo para tarefas gerais." },
     { id: "nousresearch/hermes-3-llama-3.1-405b:free", name: "Hermes 3 (405B)", tags: ["Uncensored", "Coding", "God Tier"], desc: "O modelo open-source mais inteligente. Sem filtros morais, excelente para código complexo." },
-    { id: "gryphe/mythomax-l2-13b:free", name: "MythoMax 13B", tags: ["Roleplay", "NSFW", "Creative"], desc: "O rei do Roleplay sem censura. Entende contextos adultos perfeitamente." },
     { id: "deepseek/deepseek-r1:free", name: "DeepSeek R1", tags: ["Raciocínio", "Coding", "Top Tier"], desc: "Excelente para lógica complexa e código. Um dos melhores open source." },
-    { id: "deepseek/deepseek-v3:free", name: "DeepSeek V3", tags: ["Geral", "Equilibrado"], desc: "Versão V3 estável, boa para chat e instruções diretas." },
-    { id: "mistralai/mistral-7b-instruct:free", name: "Mistral 7B", tags: ["Leve", "Rápido"], desc: "Modelo leve e eficiente para respostas curtas." },
-];
-
-const CREATIVE_PRESETS = [
-    { id: 'cyberpunk', label: 'Neon Cyberpunk', desc: 'Escuro, neons, glitch.', colors: 'from-pink-600 to-purple-600' },
-    { id: 'minimal', label: 'Minimal Clean', desc: 'Branco, clean, tipografia.', colors: 'from-gray-200 to-gray-400 text-black' },
-    { id: 'paper', label: 'Paper Note', desc: 'Feito à mão, papel, lúdico.', colors: 'from-yellow-100 to-orange-100 text-black' }, 
-    { id: 'retro', label: 'Retro 8-Bit', desc: 'Pixel art, cores primárias.', colors: 'from-green-500 to-yellow-500' },
-    { id: 'dark_souls', label: 'Dark Fantasy', desc: 'Gótico, vermelho escuro.', colors: 'from-red-900 to-black' },
-    { id: 'arcade', label: 'Arcade Pop', desc: 'Vibrante, divertido, bouncy.', colors: 'from-orange-500 to-yellow-400' }
 ];
 
 const convertToSupportedImage = (blob: Blob): Promise<Blob> => {
   return new Promise((resolve) => {
-      // Se for muito grande, a gente rejeita ou comprime (Aqui vamos manter simples, mas seguro)
-      if (blob.size > 5 * 1024 * 1024) { // 5MB Limit
+      if (blob.size > 5 * 1024 * 1024) { 
           console.warn("Imagem muito grande para processamento direto.");
-          resolve(blob); 
-          return;
+          resolve(blob); return;
       }
-
       if (['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(blob.type)) {
-          resolve(blob);
-          return;
+          resolve(blob); return;
       }
       if (!blob.type.startsWith('image/')) {
-           resolve(blob);
-           return;
+           resolve(blob); return;
       }
       const img = new Image();
       const url = URL.createObjectURL(blob);
-      
       img.onload = () => {
           const canvas = document.createElement('canvas');
-          // Redimensionar se for gigante para evitar OOM
           const MAX_DIM = 2048;
           let width = img.width;
           let height = img.height;
-          
           if (width > MAX_DIM || height > MAX_DIM) {
               const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
               width *= ratio;
               height *= ratio;
           }
-
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
@@ -163,27 +167,22 @@ const convertToSupportedImage = (blob: Blob): Promise<Blob> => {
                   else resolve(blob);
               }, 'image/png', 0.8);
           } else {
-              URL.revokeObjectURL(url);
-              resolve(blob);
+              URL.revokeObjectURL(url); resolve(blob);
           }
       };
-      
-      img.onerror = () => {
-          URL.revokeObjectURL(url);
-          resolve(blob); 
-      }
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(blob); }
       img.src = url;
   });
 };
 
 function AppContent() {
   const [files, setFiles] = useState<ProjectFiles>(INITIAL_FILES);
-  const [activeFilename, setActiveFilename] = useState<string>('index.html');
+  const [activeFilename, setActiveFilename] = useState<string>('App.tsx');
   const [history, setHistory] = useState<ProjectFiles[]>([INITIAL_FILES]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: '1', role: 'assistant', content: 'Olá! Sou seu Arquiteto de Software. Vamos criar um projeto organizado em arquivos?' }
+    { id: '1', role: 'assistant', content: 'Olá! Sou seu Arquiteto de Software. Suporto React, TypeScript e HTML5.' }
   ]);
   const [input, setInput] = useState('');
   const [lastPrompt, setLastPrompt] = useState(''); 
@@ -204,6 +203,7 @@ function AppContent() {
   const [showTools, setShowTools] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false); 
   const [isThinkingMode, setIsThinkingMode] = useState(false);
+  const [showGitHubModal, setShowGitHubModal] = useState(false); // NEW STATE
   
   const [isGameMode, setIsGameMode] = useState(() => {
     if (typeof localStorage !== 'undefined') {
@@ -291,7 +291,7 @@ function AppContent() {
   const updateFilesWithHistory = (newFiles: ProjectFiles) => { const newHistory = history.slice(0, historyIndex + 1); newHistory.push(newFiles); setHistory(newHistory); setHistoryIndex(newHistory.length - 1); setFiles(newFiles); };
   const handleUndo = () => { if (historyIndex > 0) { const newIndex = historyIndex - 1; setHistoryIndex(newIndex); setFiles(history[newIndex]); setHighlightSnippet(undefined); setRuntimeError(null); } };
   const handleRedo = () => { if (historyIndex < history.length - 1) { const newIndex = historyIndex + 1; setHistoryIndex(newIndex); setFiles(history[newIndex]); setHighlightSnippet(undefined); setRuntimeError(null); } };
-  const handleCreateFile = () => { const name = prompt("Nome do arquivo (ex: js/player.js):"); if (name && name.trim()) { const fileName = name.trim(); if (files[fileName]) return alert("Arquivo já existe."); const newFiles = { ...files, [fileName]: '' }; updateFilesWithHistory(newFiles); setActiveFilename(fileName); setActiveTab(AppTab.EDITOR); } };
+  const handleCreateFile = () => { const name = prompt("Nome do arquivo (ex: components/Button.tsx):"); if (name && name.trim()) { const fileName = name.trim(); if (files[fileName]) return alert("Arquivo já existe."); const newFiles = { ...files, [fileName]: '' }; updateFilesWithHistory(newFiles); setActiveFilename(fileName); setActiveTab(AppTab.EDITOR); } };
 
   const handleDownload = async () => {
     setShowDownloadModal(false);
@@ -332,15 +332,17 @@ function AppContent() {
         const zip = new JSZip();
         try {
             const content = await zip.loadAsync(file);
-            const newFiles: ProjectFiles = {};
+            let newFiles: ProjectFiles = {}; // Changed to let to allow modification
             let mainFile = '';
             const entries = Object.entries(content.files);
             for (const [relativePath, zipEntry] of entries) {
                 const entry = zipEntry as any;
                 if (entry.dir) continue;
                 if (relativePath.includes('__MACOSX') || relativePath.includes('.DS_Store')) continue;
+                
+                // EXTENDED EXTENSIONS SUPPORT
                 const ext = relativePath.split('.').pop()?.toLowerCase();
-                if (['html', 'htm', 'css', 'js', 'json', 'txt', 'md', 'xml', 'svg'].includes(ext || '')) {
+                if (['html', 'htm', 'css', 'js', 'json', 'txt', 'md', 'xml', 'svg', 'jsx', 'tsx', 'ts'].includes(ext || '')) {
                     const text = await entry.async('string');
                     newFiles[relativePath] = text;
                     if (!mainFile && (ext === 'html' || ext === 'htm')) {
@@ -348,16 +350,43 @@ function AppContent() {
                     }
                 }
             }
+
+            // AUTO-FLATTEN
+            const keys = Object.keys(newFiles);
+            if (keys.length > 0) {
+                const firstKey = keys[0];
+                const slashIndex = firstKey.indexOf('/');
+                if (slashIndex > -1) {
+                    const potentialRoot = firstKey.substring(0, slashIndex + 1); // e.g., "MyGame/"
+                    const allStartWithRoot = keys.every(k => k.startsWith(potentialRoot));
+                    
+                    if (allStartWithRoot) {
+                        const strippedFiles: ProjectFiles = {};
+                        for (const k of keys) {
+                            strippedFiles[k.substring(potentialRoot.length)] = newFiles[k];
+                        }
+                        newFiles = strippedFiles;
+                        
+                        // Re-evaluate main file after stripping
+                        mainFile = '';
+                        const strippedKeys = Object.keys(newFiles);
+                        if (strippedKeys.includes('index.html')) mainFile = 'index.html';
+                        else if (strippedKeys.includes('src/index.html')) mainFile = 'src/index.html';
+                        else if (strippedKeys.includes('public/index.html')) mainFile = 'public/index.html';
+                    }
+                }
+            }
+
             if (Object.keys(newFiles).length > 0) {
                 updateFilesWithHistory(newFiles);
-                const preferred = Object.keys(newFiles).find(f => f.toLowerCase().includes('index.html')) || mainFile || Object.keys(newFiles)[0];
+                const preferred = Object.keys(newFiles).find(f => f.toLowerCase().includes('index.html')) || Object.keys(newFiles).find(f => f.endsWith('.tsx')) || mainFile || Object.keys(newFiles)[0];
                 setActiveFilename(preferred);
-                setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: `📦 **ZIP Extraído**: ${Object.keys(newFiles).length} arquivos de código carregados.` }]);
+                setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: `📦 **ZIP Extraído**: ${Object.keys(newFiles).length} arquivos carregados.\nProjeto normalizado para a raiz.` }]);
                 setActiveTab(AppTab.EDITOR);
                 setIsSidebarOpen(true);
                 setRefreshKey(prev => prev + 1);
             } else {
-                alert("Nenhum arquivo de código suportado (html/js/css) encontrado no ZIP.");
+                alert("Nenhum arquivo de código suportado encontrado no ZIP.");
             }
         } catch (err: any) {
             console.error(err);
@@ -383,287 +412,133 @@ function AppContent() {
     }
     e.target.value = '';
   };
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data && event.data.type === 'PREVIEW_ERROR') {
-        const { message, line } = event.data.payload;
-        if (message && message.includes('ResizeObserver')) return;
-        
-        // Ignore generic 'Script error.' if there is no line information, usually noise or CORS issues.
-        if (message === 'Script error.' && !line) return;
-
-        setRuntimeError(event.data.payload);
-      }
-      if (event.data && event.data.type === 'LINK_CLICK') {
-          const href = event.data.payload as string;
-          let targetFile = '';
-          const cleanHref = href.split('#')[0].split('?')[0]; 
-          if (files[cleanHref]) targetFile = cleanHref;
-          else if (files[cleanHref.replace(/^\//, '')]) targetFile = cleanHref.replace(/^\//, '');
-          else if (files[cleanHref + '.html']) targetFile = cleanHref + '.html';
-          else if (files[cleanHref.replace(/^\//, '') + '.html']) targetFile = cleanHref.replace(/^\//, '') + '.html';
-          if (targetFile) {
-              setActiveFilename(targetFile);
-              setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: `🔄 Navegando para: ${targetFile}` }]);
-          } else {
-              if (href.startsWith('http')) {
-                  window.open(href, '_blank');
-              } else {
-                  setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: `⚠️ Arquivo não encontrado: ${href}` }]);
-              }
-          }
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [files]);
-
-  useEffect(() => { setRuntimeError(null); }, [refreshKey, activeFilename]);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, activeTab]);
-
-  const applyPatchesSequentially = async (patches: CodePatch[]) => {
-    let currentFiles = { ...files }; 
-    // CRITICAL: Keep track of active file locally to prevent "Black Screen" crash during rapid updates
-    let currentActiveFile = activeFilename;
-
-    setActiveTab(AppTab.EDITOR);
-    setAgentStatus(prev => ({ ...prev, mode: 'coding', logs: [...prev.logs, { message: 'Iniciando aplicação de patches...', timestamp: Date.now(), type: 'info' }] }));
-
-    let patchCount = 0;
-    
-    // SAFE GUARD: Loop protegido para evitar crash se um patch falhar drasticamente
-    for (const patch of patches) {
-      try {
-          patchCount++;
-          // Fallback para descrição se vier undefined
-          const patchDesc = patch.description || `Aplicando alterações no arquivo ${patch.targetFile}`;
-          
-          setAgentStatus(prev => ({ ...prev, progress: 95 + ((patchCount / patches.length) * 5), logs: [...prev.logs, { message: patchDesc, timestamp: Date.now(), type: 'info' }] }));
-          await new Promise(resolve => setTimeout(resolve, 600)); 
-          
-          const target = patch.targetFile || currentActiveFile;
-          const fileContent = currentFiles[target] || '';
-          
-          if (patch.action === 'create' || (patch.targetFile === 'index.html' && fileContent.includes('Novo Projeto'))) {
-             currentFiles[target] = patch.newSnippet || '';
-             currentActiveFile = target;
-             setActiveFilename(target);
-          } else if (patch.action === 'delete') {
-             delete currentFiles[target];
-          } else {
-            const result = applyPatch(fileContent, patch);
-            if (result.success) {
-               currentFiles[target] = result.newCode;
-               
-               // PREVENÇÃO DE CRASH DO MONACO EDITOR (Regex too large)
-               // Se o snippet for muito grande (ex: base64 images), não tentamos destacar.
-               if (patch.newSnippet && patch.newSnippet.length < 5000) {
-                   setHighlightSnippet(patch.newSnippet);
-               } else {
-                   setHighlightSnippet(undefined);
-               }
-
-               if (target !== currentActiveFile) {
-                   currentActiveFile = target;
-                   setActiveFilename(target);
-               }
-            } else {
-               setAgentStatus(prev => ({ ...prev, logs: [...prev.logs, { message: `⚠️ FALHA: ${patchDesc}`, timestamp: Date.now(), type: 'warning' }] }));
-               // ALERTA VISUAL NO CHAT SE FALHAR
-               setMessages(prev => [...prev, { 
-                   id: Date.now().toString(), 
-                   role: 'system', 
-                   content: `❌ **Falha ao aplicar patch no arquivo '${target}'**.\nMotivo: O trecho de código original não foi encontrado exatamente como a IA descreveu. A IA pode tentar novamente ou você pode aplicar manualmente.` 
-               }]);
-            }
-          }
-          
-          // SAFETY: Update state only if files actually exist
-          if (Object.keys(currentFiles).length > 0) {
-              setFiles({ ...currentFiles });
-          }
-      } catch (e) {
-          console.error("Patch Error:", e);
-      }
-    }
-    
-    updateFilesWithHistory(currentFiles);
-    setAgentStatus({ isActive: false, mode: 'idle', logs: [], progress: 100, estimatedSeconds: 0 });
-    setRefreshKey(prev => prev + 1);
-    // Note: We might leave highlightSnippet active for the last patch if it was small enough
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-            const base64 = reader.result.split(',')[1];
-            resolve(base64);
-        } else {
-            reject(new Error("Falha ao ler arquivo"));
-        }
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
-  const handleStreamChunk = (chunk: string) => {
-      setStreamedResponse(prev => prev + chunk);
-      setActiveTab(AppTab.EDITOR);
-      setAgentStatus(prev => ({ 
-          ...prev, 
-          progress: Math.min(prev.progress + 0.2, 95) 
-      }));
-  };
-
-  const processAiRequest = async (technicalPrompt: string, userVisibleMessage?: string, forceThinking: boolean = false, attachments: File[] = [], modeOverride?: boolean, requireConfirmation: boolean = false) => {
-    if (agentStatus.isActive) return;
-    setActiveTab(AppTab.EDITOR); 
-    
-    let displayMessage = userVisibleMessage || technicalPrompt;
-    
-    const attachmentPreviews = attachments.map(f => URL.createObjectURL(f));
-
-    if (displayMessage && displayMessage.trim()) {
-        setMessages(prev => [...prev, { 
-            id: Date.now().toString(), 
-            role: 'user', 
-            content: displayMessage,
-            attachments: attachmentPreviews.length > 0 ? attachmentPreviews : undefined 
-        }]);
-    }
-    setInput('');
-    setChatAttachments([]); 
-    setRuntimeError(null); 
-    setShowTools(false);
-    setStreamedResponse(''); 
-
-    const modeToUse = modeOverride !== undefined ? modeOverride : isGameMode;
-    const isComplex = forceThinking || isThinkingMode || technicalPrompt.length > 100;
-    const simMode = isComplex ? 'thinking' : 'coding';
-    const eta = isComplex ? 60 : 25;
-    setAgentStatus({ isActive: true, mode: simMode, logs: [], progress: 5, estimatedSeconds: eta });
-    
-    try {
-      const processedAttachments: Attachment[] = [];
-      for (const file of attachments) {
-          try {
-             const base64 = await fileToBase64(file);
-             processedAttachments.push({ mimeType: file.type, data: base64 });
-          } catch(err) {
-              console.error("Falha ao processar anexo para IA", file.name, err);
-          }
-      }
-      const response = await analyzeAndEditCode(files, technicalPrompt, processedAttachments, forceThinking || isThinkingMode, modeToUse, handleStreamChunk, platformTarget);
-      
-      if (processedAttachments.length > 0) {
-          response.patches.forEach(patch => {
-              if (patch.newSnippet) {
-                  processedAttachments.forEach((att, idx) => {
-                      const placeholder = `__ATTACHMENT_${idx}__`;
-                      const dataUri = `data:${att.mimeType};base64,${att.data}`;
-                      patch.newSnippet = patch.newSnippet!.split(placeholder).join(dataUri);
-                  });
-              }
-          });
-      }
-
-      setAgentStatus(prev => ({ ...prev, progress: 100 }));
-      
-      if (requireConfirmation) {
-          setAgentStatus({ isActive: false, mode: 'idle', logs: [], progress: 100, estimatedSeconds: 0 });
-          setPendingCreativeUpdate(response);
-          return;
-      }
-
-      await applyPatchesSequentially(response.patches);
-
-      setMessages(prev => [...prev, { id: (Date.now() + 2).toString(), role: 'assistant', content: '✅ Processo finalizado.' }]);
-    } catch (error: any) {
-      console.error(error);
-      setAgentStatus({ isActive: false, mode: 'idle', logs: [], progress: 0, estimatedSeconds: 0 });
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: error.message || 'Erro inesperado.' }]);
-    }
-  };
-
-  const handleSendMessage = () => { 
-      if (input.trim() || chatAttachments.length > 0) { 
-          setLastPrompt(input); 
-          let finalPrompt = input;
-          if (pendingAssetContext) finalPrompt += pendingAssetContext;
-          
-          if (!finalPrompt.trim() && chatAttachments.length > 0) {
-              finalPrompt = "Integre os arquivos visualmente anexados ao código. Use os placeholders __ATTACHMENT_X__ conforme instruído.";
-          }
-
-          processAiRequest(finalPrompt, input || (chatAttachments.length > 0 ? "Enviando anexos..." : ""), false, chatAttachments); 
-          setPendingAssetContext('');
-      } 
-  };
-
-  const handleRegenerate = () => { if (!lastPrompt && chatAttachments.length === 0) return; const retryPrompt = `${lastPrompt} \n\n[SISTEMA]: "DO ZERO" (WIPE). O usuário não gostou da versão anterior. \n1. IGNORE e SOBRESCREVA qualquer código existente (use action: 'create').\n2. Tente uma abordagem completamente diferente e melhorada.\n3. Foco em VISUAL e FÍSICA.`; processAiRequest(retryPrompt, "🔄 Tentando novamente do zero (Wipe & Redo)...", true, chatAttachments); };
-  const handleFixError = () => { if (runtimeError) { const prompt = `CORREÇÃO DE ERRO no arquivo '${activeFilename}': O preview falhou com "${runtimeError.message}" na linha ${runtimeError.line || '?'}. Identifique a causa e corrija.`; processAiRequest(prompt, `Corrigir erro: ${runtimeError.message}`, true); } };
-  const handleDeepDebug = () => { processAiRequest("ANÁLISE PROFUNDA: Verifique todos os arquivos por erros de lógica ou referências quebradas.", "🔍 Iniciando Deep Debug...", true); };
-  const handleClearChat = () => { setMessages([{ id: Date.now().toString(), role: 'assistant', content: 'Chat limpo. Como posso ajudar agora?' }]); setShowTools(false); };
   
-  const submitCreativeTheme = () => {
-      setShowCreativeModal(false);
-      const styleName = CREATIVE_PRESETS.find(p => p.id === creativeStyle)?.label || 'Personalizado/Livre';
-      const prompt = `ATUAR COMO CRIADOR DE JOGOS FULL-STACK (GAME DESIGNER + ENGENHEIRO).
-      OBJETIVO: Criar uma solução completa (Visual + Lógica) para o pedido do usuário.
-      PEDIDO DO USUÁRIO: "${creativeInstruction}"
-      ${creativeStyle ? `REFERÊNCIA VISUAL: ${styleName}` : ''}
-      REGRAS CRÍTICAS:
-      1. NÃO SE LIMITE AO CSS. Se o usuário pedir uma mecânica, DEVE escrever o JavaScript.
-      2. Crie novos arquivos se necessário.
-      3. Seja ousado na implementação.
-      4. Explique seu plano no 'thoughtProcess'.
-      `;
-      processAiRequest(prompt, `🚀 Planejando Mecânicas & Visual: ${creativeInstruction.substring(0, 30)}...`, true, [], undefined, true);
-  };
-
-  const applyPendingCreative = async () => {
-      if (!pendingCreativeUpdate) return;
-      setPendingCreativeUpdate(null);
-      // setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: pendingCreativeUpdate.thoughtProcess }]);
-      await applyPatchesSequentially(pendingCreativeUpdate.patches);
-      setMessages(prev => [...prev, { id: (Date.now() + 2).toString(), role: 'assistant', content: '✅ Alterações aplicadas com sucesso.' }]);
-  };
-  
-  const handleChatAttachmentSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { 
-    if (e.target.files) { 
-        const rawFiles: File[] = Array.from(e.target.files); 
-        if (chatAttachments.length + rawFiles.length > 3) return alert("Máximo 3 arquivos.");
-        const processedFiles: File[] = [];
-        
-        for (const file of rawFiles) {
-            // Proteção contra arquivos gigantes (5MB) para evitar crash de memória/render
-            if (file.size > 5 * 1024 * 1024) {
-                alert(`O arquivo "${file.name}" é muito grande (Máx 5MB). Ele será ignorado.`);
-                continue;
-            }
-
-            if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
-                try {
-                    const convertedBlob = await convertToSupportedImage(file);
-                    const newFile = new File([convertedBlob], file.name.replace(/\.(gif|svg)$/i, '.png'), { type: 'image/png' });
-                    processedFiles.push(newFile);
-                } catch (e) { 
-                    console.error("Erro na conversão de imagem", e);
-                    processedFiles.push(file); 
-                }
-            } else { processedFiles.push(file); }
-        }
-        setChatAttachments(prev => [...prev, ...processedFiles]); 
-    } 
-    if (fileInputRef.current) fileInputRef.current.value = ''; 
-    if (imageInputRef.current) imageInputRef.current.value = ''; 
-  };
-  
+  // IMPLEMENTING MISSING FUNCTIONS
   const filteredFiles = Object.keys(files).filter(f => f.toLowerCase().includes(fileSearch.toLowerCase())).sort();
+
+  const handleChatAttachmentSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+          setChatAttachments(prev => [...prev, ...Array.from(e.target.files!)]);
+      }
+      e.target.value = '';
+  };
+
+  const processAiRequest = async (prompt: string, attachments: File[] = []) => {
+      setAgentStatus({ isActive: true, mode: 'thinking', logs: [{message: 'Iniciando...', timestamp: Date.now(), type: 'info'}], progress: 5, estimatedSeconds: 5 });
+      setStreamedResponse('');
+      
+      try {
+          const processedAttachments: Attachment[] = [];
+          for (const file of attachments) {
+              const reader = new FileReader();
+              const p = new Promise<Attachment>(resolve => {
+                  reader.onload = (evt) => {
+                       const b64 = (evt.target?.result as string || '').split(',')[1];
+                       resolve({ mimeType: file.type, data: b64 || '' });
+                  };
+                  reader.readAsDataURL(file);
+              });
+              processedAttachments.push(await p);
+          }
+
+          const res = await analyzeAndEditCode(
+              files,
+              prompt,
+              processedAttachments,
+              isThinkingMode,
+              false,
+              (chunk) => setStreamedResponse(prev => prev + chunk),
+              platformTarget,
+              (msg) => setAgentStatus(prev => ({...prev, logs: [...prev.logs, {message: msg, timestamp: Date.now(), type: 'info'}]}))
+          );
+
+          if (res.patches && res.patches.length > 0) {
+               setAgentStatus(prev => ({ ...prev, mode: 'coding', progress: 50 }));
+               let currentFiles = { ...files };
+               for (const patch of res.patches) {
+                   if (patch.action === 'delete') {
+                       delete currentFiles[patch.targetFile];
+                   } else {
+                       const original = currentFiles[patch.targetFile] || '';
+                       const applied = applyPatch(original, patch);
+                       if (applied.success) {
+                           currentFiles[patch.targetFile] = applied.newCode;
+                       }
+                   }
+               }
+               updateFilesWithHistory(currentFiles);
+               setRefreshKey(prev => prev + 1);
+          }
+          
+          setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: res.thoughtProcess || 'Concluído.'
+          }]);
+
+      } catch (e: any) {
+           setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: `Erro: ${e.message}`
+          }]);
+      } finally {
+          setAgentStatus({ isActive: false, mode: 'idle', logs: [], progress: 0, estimatedSeconds: 0 });
+          setStreamedResponse('');
+      }
+  };
+
+  const handleSendMessage = async () => {
+      if (!input.trim() && chatAttachments.length === 0) return;
+      const txt = input;
+      const att = [...chatAttachments];
+      
+      const displayAtt = att.map(f => URL.createObjectURL(f));
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: txt, attachments: displayAtt }]);
+      
+      setInput('');
+      setChatAttachments([]);
+      setLastPrompt(txt);
+      
+      await processAiRequest(txt, att);
+  };
+
+  const handleRegenerate = async () => {
+      if (lastPrompt) await processAiRequest(lastPrompt);
+  };
+
+  const handleDeepDebug = async () => {
+      await processAiRequest("Analise profundamente o código atual, procure por bugs, erros de lógica ou problemas de performance e corrija-os. Seja minucioso.");
+  };
+
+  const handleFixError = async () => {
+      if (!runtimeError) return;
+      await processAiRequest(`Corrija o seguinte erro em tempo de execução: "${runtimeError.message}". O erro pode estar próximo da linha ${runtimeError.line || 'desconhecida'}.`);
+  };
+
+  const handleClearChat = () => {
+      setMessages([{ id: '1', role: 'assistant', content: 'Chat limpo. Como posso ajudar agora?' }]);
+  };
+
+  const applyPendingCreative = () => {
+      if (!pendingCreativeUpdate) return;
+      
+      let currentFiles = { ...files };
+       for (const patch of pendingCreativeUpdate.patches) {
+           if (patch.action === 'delete') {
+               delete currentFiles[patch.targetFile];
+           } else {
+               const original = currentFiles[patch.targetFile] || '';
+               const applied = applyPatch(original, patch);
+               if (applied.success) {
+                   currentFiles[patch.targetFile] = applied.newCode;
+               }
+           }
+       }
+       updateFilesWithHistory(currentFiles);
+       setRefreshKey(prev => prev + 1);
+       setPendingCreativeUpdate(null);
+  };
 
   return (
     <div className="flex flex-col h-[100dvh] bg-black text-zinc-100 font-sans overflow-hidden">
@@ -683,11 +558,19 @@ function AppContent() {
           <button onClick={() => setIsGameMode(!isGameMode)} className={`flex items-center justify-center w-8 h-8 rounded-md border transition-all ${isGameMode ? 'bg-indigo-900/10 border-indigo-900 text-indigo-400 hover:bg-indigo-900/30' : 'bg-emerald-900/10 border-emerald-900 text-emerald-400 hover:bg-emerald-900/30'}`} title={isGameMode ? "Modo Criação de Jogos (Sem Scroll)" : "Modo Web Dev (Com Scroll)"} > 
              {isGameMode ? <Gamepad2 className="w-4 h-4" /> : <Globe className="w-4 h-4" />} 
           </button>
+          
+          <div className="relative ml-2">
+              <button onClick={() => setShowGitHubModal(true)} className="flex items-center justify-center w-8 h-8 rounded-md border bg-black border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-white transition-all" title="Sincronizar com GitHub">
+                <Github className="w-4 h-4" />
+              </button>
+          </div>
+
           <div className="flex bg-zinc-900 rounded-md border border-zinc-800 p-0.5 ml-2">
             <button onClick={() => setPlatformTarget('mobile')} className={`p-1.5 rounded transition-colors ${platformTarget === 'mobile' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`} title="Mobile Only (Touch)"><Smartphone className="w-3.5 h-3.5" /></button>
             <button onClick={() => setPlatformTarget('pc')} className={`p-1.5 rounded transition-colors ${platformTarget === 'pc' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`} title="PC Only (Mouse/Keyboard)"><Monitor className="w-3.5 h-3.5" /></button>
             <button onClick={() => setPlatformTarget('both')} className={`p-1.5 rounded transition-colors ${platformTarget === 'both' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`} title="Cross-Platform (Responsivo)"><Laptop className="w-3.5 h-3.5" /></button>
           </div>
+          
           <div className="relative ml-2">
               <button onClick={() => setShowTools(!showTools)} className={`flex items-center justify-center w-8 h-8 rounded-md border transition-all ${showTools ? 'bg-zinc-900 border-indigo-500 text-indigo-400' : 'bg-black border-zinc-800 text-zinc-400 hover:bg-zinc-900'}`} title="Ferramentas"> 
                  <Wrench className="w-4 h-4" /> 
@@ -703,6 +586,7 @@ function AppContent() {
           </div>
         </div>
         
+        {/* ... (Existing Right Header content: Undo/Redo, Menu, etc.) ... */}
         <div className="flex items-center gap-2">
             <div className="flex items-center bg-black rounded-md border border-zinc-800 shadow-sm overflow-hidden mr-1">
                 <button onClick={handleUndo} disabled={historyIndex === 0 || agentStatus.isActive} className="p-2 hover:bg-zinc-900 text-zinc-400 disabled:opacity-30 border-r border-zinc-800"><Undo2 className="w-4 h-4" /></button>
@@ -716,7 +600,7 @@ function AppContent() {
                 {showMainMenu && (
                     <div className="absolute right-0 top-full mt-2 w-56 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col p-1 animate-in fade-in zoom-in-95 duration-100">
                         <div className="px-3 py-2 text-[10px] text-zinc-500 border-b border-zinc-800 mb-1 flex justify-between items-center bg-black/20">
-                            <span>v4.0.3</span>
+                            <span>v4.1.0</span>
                             <span className={`font-bold ${llmProvider === 'openrouter' ? 'text-purple-500' : 'text-indigo-500'}`}>
                                 {llmProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'}
                             </span>
@@ -739,6 +623,14 @@ function AppContent() {
       </header>
       
       <main className="flex-1 flex flex-col md:flex-row relative overflow-hidden">
+           {showGitHubModal && (
+                <GitHubModal 
+                    isOpen={showGitHubModal} 
+                    onClose={() => setShowGitHubModal(false)} 
+                    files={files} 
+                />
+           )}
+           {/* ... existing modals ... */}
            {showUpdateModal && (<div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300"><div className="bg-zinc-900 border border-indigo-500/30 shadow-2xl shadow-indigo-500/20 rounded-2xl max-w-lg w-full overflow-hidden"><div className="bg-gradient-to-r from-indigo-900/50 to-purple-900/50 p-6 border-b border-zinc-800"><div className="flex items-center gap-3"><PanelLeft className="w-6 h-6 text-indigo-400" /><h2 className="text-xl font-bold text-white">Hotfix v4.0.3</h2></div></div><div className="p-6 space-y-4"><ul className="space-y-3"><li className="flex gap-3 items-start"><CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" /><div className="text-sm text-zinc-300"><strong className="text-white block">Melhoria no Patcher</strong>Adicionado "Anchor Matching" para corrigir falhas de update.</div></li></ul><button onClick={closeUpdateModal} className="w-full py-3 mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all">Entendido</button></div></div></div>)}
            {showSettingsModal && (
                <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
@@ -755,6 +647,7 @@ function AppContent() {
                    </div>
                </div>
            )}
+           {/* ... existing model gallery and download ... */}
            {showModelGallery && ( <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in"> <div className="bg-zinc-900 border border-zinc-700 shadow-2xl rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden"> <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950"> <div className="flex items-center gap-3 text-purple-400 font-bold"><BookOpen className="w-5 h-5" /> Galeria de Modelos Gratuitos (OpenRouter)</div> <button onClick={() => setShowModelGallery(false)} className="p-2 hover:bg-zinc-800 rounded-full"><X className="w-5 h-5" /></button> </div> <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-black"> {FREE_OPENROUTER_MODELS.map((m) => ( <div key={m.id} onClick={() => { setCustomModel(m.id); setShowModelGallery(false); }} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-purple-500/50 hover:bg-zinc-800 transition-all cursor-pointer group"> <div className="flex justify-between items-start mb-2"> <h4 className="font-bold text-zinc-100 group-hover:text-purple-300 transition-colors">{m.name}</h4> <div className="flex gap-1"> {m.tags.map(tag => ( <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">{tag}</span> ))} </div> </div> <p className="text-sm text-zinc-500 mb-3">{m.desc}</p> <code className="text-[10px] text-zinc-600 bg-zinc-950 px-2 py-1 rounded block truncate font-mono">{m.id}</code> </div> ))} </div> <div className="p-3 bg-zinc-900 border-t border-zinc-800 text-center text-xs text-zinc-500"> Clique em um modelo para selecioná-lo automaticamente nas configurações. </div> </div> </div> )}
            {showDownloadModal && (
               <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
@@ -869,82 +762,13 @@ function AppContent() {
                    </div>
                </div>
            )}
-           
-           {showCreativeModal && (
-               <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in">
-                   <div className="bg-zinc-900 border border-pink-500/30 shadow-2xl rounded-2xl max-w-2xl w-full flex flex-col max-h-[90vh] overflow-hidden">
-                       <div className="p-5 border-b border-zinc-800 bg-zinc-950/50 flex justify-between items-center">
-                           <div className="flex items-center gap-3">
-                               <Rocket className="w-6 h-6 text-pink-500" />
-                               <div>
-                                   <h3 className="text-lg font-bold text-white">Creative Update & Mechanics</h3>
-                                   <p className="text-xs text-zinc-400">Descreva qualquer ideia. Visual, mecânicas, ou ambos.</p>
-                               </div>
-                           </div>
-                           <button onClick={() => setShowCreativeModal(false)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5"/></button>
-                       </div>
-                       
-                       <div className="p-5 overflow-y-auto space-y-6 flex-1">
-                           <div>
-                               <label className="text-sm font-bold text-white mb-2 block flex items-center gap-2">
-                                   <Sparkles className="w-4 h-4 text-pink-400" />
-                                   O que você quer criar ou mudar?
-                               </label>
-                               <textarea 
-                                   className="w-full bg-black border border-zinc-700 rounded-xl p-4 text-sm text-white focus:border-pink-500 focus:ring-1 focus:ring-pink-500/50 focus:outline-none min-h-[120px] placeholder:text-zinc-600"
-                                   placeholder="Ex: 'Faça o personagem dar pulo duplo', 'Adicione inimigos que perseguem', 'Mude tudo para tema Cyberpunk', 'Crie um sistema de pontuação'..."
-                                   value={creativeInstruction}
-                                   onChange={(e) => setCreativeInstruction(e.target.value)}
-                                   autoFocus
-                               />
-                               <p className="text-[10px] text-zinc-500 mt-2">
-                                   * A IA vai gerar um plano para você aprovar antes de alterar o código.
-                               </p>
-                           </div>
 
-                           <div className="border-t border-zinc-800 pt-4">
-                               <label className="text-xs font-bold text-zinc-400 mb-3 block flex items-center justify-between">
-                                   <span>Inspiração Visual Rápida (Opcional)</span>
-                                   {creativeStyle && <button onClick={() => setCreativeStyle('')} className="text-[10px] text-red-400 hover:text-red-300">Remover Filtro</button>}
-                               </label>
-                               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                   {CREATIVE_PRESETS.map(preset => (
-                                       <button
-                                           key={preset.id}
-                                           onClick={() => setCreativeStyle(preset.id === creativeStyle ? '' : preset.id)}
-                                           className={`relative p-2.5 rounded-lg border text-left transition-all group overflow-hidden flex flex-col gap-1 ${creativeStyle === preset.id ? 'border-pink-500 bg-pink-900/20' : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'}`}
-                                       >
-                                           <div className={`absolute inset-0 bg-gradient-to-br ${preset.colors} opacity-0 group-hover:opacity-10 transition-opacity`}></div>
-                                           <div className="flex justify-between items-start">
-                                                <span className={`font-bold text-xs ${creativeStyle === preset.id ? 'text-white' : 'text-zinc-300'}`}>{preset.label}</span>
-                                                {creativeStyle === preset.id && <CheckCircle2 className="w-3.5 h-3.5 text-pink-500" />}
-                                           </div>
-                                           <span className="text-[9px] text-zinc-500 leading-tight">{preset.desc}</span>
-                                       </button>
-                                   ))}
-                               </div>
-                           </div>
-                       </div>
-                       
-                       <div className="p-5 border-t border-zinc-800 bg-zinc-950/50 flex justify-end gap-3">
-                           <button onClick={() => setShowCreativeModal(false)} className="px-4 py-2 rounded-lg text-xs font-bold text-zinc-400 hover:text-white transition-colors">Cancelar</button>
-                           <button 
-                               onClick={submitCreativeTheme}
-                               disabled={!creativeInstruction.trim() && !creativeStyle}
-                               className="px-6 py-2 rounded-lg bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-pink-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-all hover:scale-105"
-                           >
-                               <Rocket className="w-4 h-4" /> 
-                               {creativeInstruction.trim() ? 'Planejar & Executar' : 'Aplicar Estilo'}
-                           </button>
-                       </div>
-                   </div>
-               </div>
-           )}
-
+           {/* MAIN LAYOUT */}
             <div className={`${activeTab === AppTab.EDITOR ? 'flex w-full flex-1' : 'hidden md:flex md:w-1/2'} relative bg-black flex-row`}>
                 {isSidebarOpen && (
                     <div className="flex-none w-64 bg-black border-r border-zinc-900 flex flex-col absolute md:static inset-y-0 left-0 z-40 shadow-xl md:shadow-none animate-in slide-in-from-left duration-200">
-                        <div className="p-3 border-b border-zinc-900 flex items-center gap-2">
+                        {/* Sidebar content ... */}
+                         <div className="p-3 border-b border-zinc-900 flex items-center gap-2">
                             <Search className="w-4 h-4 text-zinc-500" />
                             <input 
                                 type="text" 
@@ -966,6 +790,7 @@ function AppContent() {
                                     {filename.endsWith('.html') ? <Layout className="w-3.5 h-3.5 shrink-0 text-orange-400" /> : 
                                      filename.endsWith('.css') ? <FileText className="w-3.5 h-3.5 shrink-0 text-blue-400" /> : 
                                      filename.endsWith('.js') ? <Code className="w-3.5 h-3.5 shrink-0 text-yellow-400" /> : 
+                                     (filename.endsWith('.tsx') || filename.endsWith('.jsx')) ? <Code className="w-3.5 h-3.5 shrink-0 text-cyan-400" /> :
                                      <FileIcon className="w-3.5 h-3.5 shrink-0 text-zinc-600" />}
                                     <span className="truncate">
                                         {filename.includes('/') ? (
@@ -1061,7 +886,7 @@ function AppContent() {
                         <CodeEditor 
                             key={agentStatus.isActive ? 'ai-stream' : activeFilename} 
                             code={agentStatus.isActive ? streamedResponse : (files[activeFilename] || '')} 
-                            language={agentStatus.isActive ? 'json' : (activeFilename.endsWith('.js') ? 'javascript' : activeFilename.endsWith('.css') ? 'css' : 'html')}
+                            language={agentStatus.isActive ? 'json' : (activeFilename.endsWith('.js') ? 'javascript' : activeFilename.endsWith('.css') ? 'css' : activeFilename.endsWith('.tsx') || activeFilename.endsWith('.jsx') ? 'typescript' : 'html')}
                             theme={editorTheme}
                             customTheme={customThemeColors}
                             onChange={(val) => {
@@ -1085,9 +910,10 @@ function AppContent() {
                 
                 <div className="flex-1 relative overflow-hidden flex flex-col">
                     <div className={`absolute inset-0 flex flex-col ${ (activeTab === AppTab.PREVIEW || activeTab === AppTab.EDITOR) ? 'z-10 visible' : 'z-0 invisible' }`}>
-                         {!activeFilename.endsWith('.html') && !activeFilename.includes('index') && (
+                         {/* PREVIEW COMPONENT USAGE */}
+                         {!activeFilename.endsWith('.html') && !activeFilename.endsWith('.tsx') && !activeFilename.includes('index') && !activeFilename.includes('main') && (
                             <div className="bg-yellow-900/20 text-yellow-500 text-[10px] p-1 text-center border-b border-yellow-500/10">
-                                Visualizando arquivo auxiliar. Preview pode não refletir mudanças.
+                                Visualizando arquivo auxiliar. Preview pode não refletir mudanças se não for o entry-point.
                             </div>
                         )}
                         <Preview files={files} activeFilename={activeFilename} refreshKey={refreshKey} isGameMode={isGameMode} />
@@ -1131,7 +957,7 @@ function AppContent() {
                             </div>
                         )}
                         <div className="relative flex items-center gap-2 w-full bg-zinc-900 p-1 rounded-xl border border-zinc-800 transition-all">
-                            <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/*,.txt,.js,.html,.css,.zip" onChange={handleChatAttachmentSelect} />
+                            <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/*,.txt,.js,.html,.css,.zip,.tsx,.jsx" onChange={handleChatAttachmentSelect} />
                             <input type="file" ref={imageInputRef} className="hidden" multiple accept="image/*" onChange={handleChatAttachmentSelect} />
                             <button onClick={() => imageInputRef.current?.click()} className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-black rounded-lg transition-colors" title="Adicionar Imagem"><ImageIcon className="w-4 h-4" /></button>
                             <button onClick={() => fileInputRef.current?.click()} className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-black rounded-lg transition-colors" title="Adicionar Arquivo"><Paperclip className="w-4 h-4" /></button>
